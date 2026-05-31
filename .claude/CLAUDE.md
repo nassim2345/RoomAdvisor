@@ -1,8 +1,8 @@
 # RoomAdvisor — Claude Code Instructions
 
 ## Progetto
-App web che analizza foto di stanze tramite Claude Vision e restituisce consigli
-d'arredo personalizzati con link d'acquisto reali. Stack: Next.js 14 + Claude API
+App web che analizza foto di stanze tramite Gemini Vision e restituisce consigli
+d'arredo personalizzati con link d'acquisto reali. Stack: Next.js 14 + Gemini API
 + SerpAPI. Deploy locale in sviluppo, potenzialmente pubblico in futuro.
 
 ## MVP Core
@@ -13,7 +13,7 @@ nome, descrizione, link acquisto.
 - Next.js 14 (App Router)
 - React 18
 - TypeScript 5
-- Claude API (claude-sonnet-4-20250514, vision)
+- Gemini API (`@google/generative-ai`, modello `gemini-2.5-flash`, vision, JSON mode)
 - SerpAPI (ricerca prodotti)
 - Tailwind CSS 3
 - Node.js 20+
@@ -38,7 +38,7 @@ npm run type-check   # tsc --noEmit
 - NEVER modificare `.env.local` — suggerisci le variabili, non scriverle
 - NEVER saltare TypeScript — niente `any` impliciti, niente `@ts-ignore` senza commento
 - NEVER modificare file fuori dalla root del progetto
-- NEVER fare chiamate dirette a Claude API o SerpAPI dal frontend — solo tramite API routes
+- NEVER fare chiamate dirette a Gemini API o SerpAPI dal frontend — solo tramite API routes
 - NEVER committare `node_modules/`, `.env.local`, `.next/`
 - NEVER procedere a implementare se il piano non è stato confermato dall'utente
 
@@ -58,7 +58,7 @@ npm run type-check   # tsc --noEmit
 
 ## Variabili d'ambiente richieste
 ```
-ANTHROPIC_API_KEY=
+GEMINI_API_KEY=
 SERPAPI_KEY=
 ```
 Entrambe vanno in `.env.local` — mai altrove.
