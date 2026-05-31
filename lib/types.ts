@@ -29,3 +29,32 @@ export interface AnalyzeError {
   error: string;
   code: AnalyzeErrorCode;
 }
+
+export interface FurnitureQuery {
+  category: string;
+  query: string;
+}
+
+export interface Product {
+  category: string;
+  query: string;
+  name: string;
+  price: string | null;
+  link: string;
+  thumbnail: string | null;
+}
+
+export interface ProductsRequest {
+  analysis: RoomAnalysis;
+}
+
+export interface ProductsResponse {
+  products: Product[];
+}
+
+export type ProductsErrorCode = AnalyzeErrorCode;
+
+export interface ProductsError {
+  error: string;
+  code: ProductsErrorCode;
+}

@@ -3,7 +3,12 @@ import {
   type GenerativeModel,
   SchemaType,
 } from "@google/generative-ai";
-import { ROOM_ANALYSIS_SCHEMA, SYSTEM_INSTRUCTION } from "./prompts";
+import {
+  FURNITURE_PLAN_SCHEMA,
+  FURNITURE_SYSTEM_INSTRUCTION,
+  ROOM_ANALYSIS_SCHEMA,
+  SYSTEM_INSTRUCTION,
+} from "./prompts";
 
 let cachedClient: GoogleGenerativeAI | null = null;
 
@@ -29,6 +34,18 @@ export function getVisionModel(): GenerativeModel {
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: ROOM_ANALYSIS_SCHEMA,
+    },
+  });
+}
+
+export function getPlanningModel(): GenerativeModel {
+  const client = getGeminiClient();
+  return client.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    systemInstruction: FURNITURE_SYSTEM_INSTRUCTION,
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: FURNITURE_PLAN_SCHEMA,
     },
   });
 }
