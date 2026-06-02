@@ -46,8 +46,6 @@ export interface Product {
   thumbnail: string | null;
 }
 
-export type Budget = "economico" | "medio" | "alto" | "lusso";
-
 export interface PriceRange {
   min?: number;
   max?: number;
@@ -55,7 +53,7 @@ export interface PriceRange {
 
 export interface ProductsRequest {
   analysis: RoomAnalysis;
-  budget?: Budget;
+  budget?: number;
 }
 
 export interface ProductsResponse {
@@ -68,3 +66,21 @@ export interface ProductsError {
   error: string;
   code: ProductsErrorCode;
 }
+
+export interface RecommendRequest {
+  images: string[];
+  dimensions?: string;
+  budget?: number;
+}
+
+export interface SharedResult {
+  analysis: RoomAnalysis;
+  products: Product[];
+}
+
+export type RecommendEvent =
+  | { type: "analysis"; data: RoomAnalysis }
+  | { type: "product"; data: Product }
+  | { type: "shared"; data: { id: string } }
+  | { type: "error"; data: { code: AnalyzeErrorCode; message: string } }
+  | { type: "done"; data: Record<string, never> };

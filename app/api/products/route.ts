@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { BUDGET_RANGES, isBudget } from "@/lib/budget";
+import { budgetToPriceRange, isValidBudget } from "@/lib/budget";
 import { getPlanningModel } from "@/lib/gemini";
 import { buildFurniturePrompt } from "@/lib/prompts";
 import { SerpApiError, searchShopping } from "@/lib/serpapi";
 import type {
-  Budget,
   FurnitureQuery,
   Product,
   ProductsError,
@@ -54,18 +53,18 @@ export async function POST(req: Request) {
     );
   }
 
-  let budget: Budget | undefined;
+  let budget: number | undefined;
   if (body.budget !== undefined) {
-    if (!isBudget(body.budget)) {
+    if (!isValidBudget(body.budget)) {
       return errorResponse(
         "INVALID_INPUT",
-        'Campo "budget" non valido (atteso: economico, medio, alto, lusso)',
+        'Campo "budget" deve essere un numero positivo (euro massimi per pezzo)',
         400
       );
     }
     budget = body.budget;
   }
-  const priceRange = budget ? BUDGET_RANGES[budget] : undefined;
+  const priceRange = budget ? budgetToPriceRange(budget) : undefined;
 
   let plan: FurnitureQuery[];
   try {

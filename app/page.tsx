@@ -5,14 +5,9 @@ import ImageUploader from "@/components/ImageUploader";
 import ProductsPanel from "@/components/ProductsPanel";
 import ResetButton from "@/components/ResetButton";
 import ResultsPanel from "@/components/ResultsPanel";
+import ShareButton from "@/components/ShareButton";
 import { AnalysisSkeleton, ProductsSkeleton } from "@/components/Skeleton";
-import type {
-  Budget,
-  Product,
-  ProductsError,
-  ProductsResponse,
-  RoomAnalysis,
-} from "@/lib/types";
+import type { Product, RoomAnalysis } from "@/lib/types";
 
 type AppError = { message: string; code?: string } | null;
 
@@ -57,39 +52,18 @@ export default function Home() {
   const [productsLoading, setProductsLoading] = useState(false);
   const [productsError, setProductsError] = useState<AppError>(null);
 
-  const [budget, setBudget] = useState<Budget | null>(null);
+  const [budget, setBudget] = useState<number | null>(null);
+  const [shareId, setShareId] = useState<string | null>(null);
   const [resetKey, setResetKey] = useState(0);
 
-  async function fetchProducts(roomAnalysis: RoomAnalysis) {
-    setProductsLoading(true);
-    setProductsError(null);
+  function handleStart() {
+    setAnalysis(null);
+    setAnalysisError(null);
     setProducts(null);
-    try {
-      const res = await fetch("/api/products", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          analysis: roomAnalysis,
-          ...(budget ? { budget } : {}),
-        }),
-      });
-      const payload: ProductsResponse | ProductsError = await res.json();
-      if (!res.ok) {
-        const e = payload as ProductsError;
-        setProductsError({
-          message: e.error ?? "Errore sconosciuto",
-          code: e.code,
-        });
-        return;
-      }
-      setProducts((payload as ProductsResponse).products);
-    } catch (err) {
-      setProductsError({
-        message: err instanceof Error ? err.message : "Errore di rete",
-      });
-    } finally {
-      setProductsLoading(false);
-    }
+    setProductsError(null);
+    setShareId(null);
+    setAnalysisLoading(true);
+    setProductsLoading(true);
   }
 
   function handleReset() {
@@ -97,6 +71,9 @@ export default function Home() {
     setAnalysisError(null);
     setProducts(null);
     setProductsError(null);
+    setShareId(null);
+    setAnalysisLoading(false);
+    setProductsLoading(false);
     setBudget(null);
     setResetKey((k) => k + 1);
   }
@@ -114,14 +91,27 @@ export default function Home() {
   const uploader = (
     <ImageUploader
       key={resetKey}
-      onResult={(a) => {
+      onStart={handleStart}
+      onAnalysis={(a) => {
         setAnalysis(a);
-        setAnalysisError(null);
-        fetchProducts(a);
+        setAnalysisLoading(false);
       }}
-      onLoading={setAnalysisLoading}
-      onError={setAnalysisError}
-      disabled={analysisLoading}
+      onAnalysisError={(e) => {
+        setAnalysisError(e);
+        setAnalysisLoading(false);
+        setProductsLoading(false);
+      }}
+      onProduct={(p) => setProducts((prev) => [...(prev ?? []), p])}
+      onProductsError={(e) => {
+        setProductsError(e);
+        setProductsLoading(false);
+      }}
+      onShared={(id) => setShareId(id)}
+      onComplete={() => {
+        setAnalysisLoading(false);
+        setProductsLoading(false);
+      }}
+      disabled={analysisLoading || productsLoading}
       compact={analysis !== null || analysisLoading}
       budget={budget}
       onBudgetChange={setBudget}
@@ -135,6 +125,15 @@ export default function Home() {
       <ErrorBanner title="Errore analisi" error={analysisError} />
     );
 
+  const productsRegion =
+    products && products.length > 0 ? (
+      <ProductsPanel products={products} loading={productsLoading} />
+    ) : productsLoading ? (
+      <ProductsSkeleton />
+    ) : (
+      <ProductsPanel products={products} />
+    );
+
   return (
     <main className="min-h-screen bg-brand-bg">
       <nav className="sticky top-0 z-50 h-14 border-b border-brand-border bg-brand-surface">
@@ -142,41 +141,51 @@ export default function Home() {
           <span className="text-lg font-semibold tracking-tight text-brand-text">
             RoomAdvisor
           </span>
-          {showReset && <ResetButton onReset={handleReset} />}
+          <div className="flex items-center gap-2">
+            {shareId && !productsLoading && <ShareButton id={shareId} />}
+            {showReset && <ResetButton onReset={handleReset} />}
+          </div>
         </div>
       </nav>
 
       <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
-        {!hasResults ? (
-          <div className="flex flex-col items-center gap-4">
+        {/* Albero stabile: l'uploader resta sempre primo figlio dello stesso
+            <aside> per evitare unmount/remount (che abortirebbe lo stream SSE).
+            Cambiano solo le className e la presenza della colonna prodotti. */}
+        <div
+          className={
+            hasResults
+              ? "grid grid-cols-1 gap-8 lg:grid-cols-[420px_1fr] lg:items-start"
+              : "flex justify-center"
+          }
+        >
+          <aside
+            className={
+              hasResults
+                ? "flex flex-col gap-6 lg:sticky lg:top-[72px] lg:max-h-[calc(100vh-88px)] lg:overflow-y-auto lg:pr-2"
+                : "flex w-full max-w-2xl flex-col gap-4"
+            }
+          >
             {uploader}
             {analysisErrorRegion}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[420px_1fr] lg:items-start">
-            <aside className="flex flex-col gap-6 lg:sticky lg:top-[72px] lg:max-h-[calc(100vh-88px)] lg:overflow-y-auto lg:pr-2">
-              {uploader}
-              {analysisErrorRegion}
-              {analysisLoading ? (
+            {hasResults &&
+              (analysisLoading ? (
                 <AnalysisSkeleton />
               ) : (
                 <ResultsPanel analysis={analysis} />
-              )}
-            </aside>
+              ))}
+          </aside>
 
+          {hasResults && (
             <section className="flex flex-col gap-6">
               <ErrorBanner
                 title="Errore ricerca prodotti"
                 error={productsError}
               />
-              {productsLoading ? (
-                <ProductsSkeleton />
-              ) : (
-                <ProductsPanel products={products} />
-              )}
+              {productsRegion}
             </section>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </main>
   );

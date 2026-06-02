@@ -2,9 +2,13 @@ import type { Product } from "@/lib/types";
 
 interface ProductsPanelProps {
   products: Product[] | null;
+  loading?: boolean;
 }
 
-export default function ProductsPanel({ products }: ProductsPanelProps) {
+export default function ProductsPanel({
+  products,
+  loading = false,
+}: ProductsPanelProps) {
   if (products === null) return null;
 
   if (products.length === 0) {
@@ -67,6 +71,15 @@ export default function ProductsPanel({ products }: ProductsPanelProps) {
           </li>
         ))}
       </ul>
+      {loading && (
+        <p className="mt-4 flex items-center gap-2 text-sm text-brand-text-muted">
+          <span
+            aria-hidden
+            className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-border border-t-brand-text"
+          />
+          Cerco altri prodotti…
+        </p>
+      )}
     </section>
   );
 }

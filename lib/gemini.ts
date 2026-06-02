@@ -6,6 +6,7 @@ import {
 import {
   FURNITURE_PLAN_SCHEMA,
   FURNITURE_SYSTEM_INSTRUCTION,
+  IMAGE_PLAN_SYSTEM_INSTRUCTION,
   ROOM_ANALYSIS_SCHEMA,
   SYSTEM_INSTRUCTION,
 } from "./prompts";
@@ -43,6 +44,18 @@ export function getPlanningModel(): GenerativeModel {
   return client.getGenerativeModel({
     model: "gemini-2.5-flash",
     systemInstruction: FURNITURE_SYSTEM_INSTRUCTION,
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: FURNITURE_PLAN_SCHEMA,
+    },
+  });
+}
+
+export function getImagePlanningModel(): GenerativeModel {
+  const client = getGeminiClient();
+  return client.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    systemInstruction: IMAGE_PLAN_SYSTEM_INSTRUCTION,
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: FURNITURE_PLAN_SCHEMA,

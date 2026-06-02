@@ -1,17 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BUDGET_LABELS, BUDGET_OPTIONS, isBudget } from "@/lib/budget";
-import type { AnalyzeError, Budget, RoomAnalysis } from "@/lib/types";
+import type { Product, RoomAnalysis } from "@/lib/types";
+
+type StreamError = { message: string; code?: string };
 
 interface ImageUploaderProps {
-  onResult: (analysis: RoomAnalysis) => void;
-  onLoading: (loading: boolean) => void;
-  onError: (error: { message: string; code?: string } | null) => void;
+  onStart: () => void;
+  onAnalysis: (analysis: RoomAnalysis) => void;
+  onAnalysisError: (error: StreamError) => void;
+  onProduct: (product: Product) => void;
+  onProductsError: (error: StreamError) => void;
+  onShared: (id: string) => void;
+  onComplete: () => void;
   disabled?: boolean;
   compact?: boolean;
-  budget: Budget | null;
-  onBudgetChange: (budget: Budget | null) => void;
+  budget: number | null;
+  onBudgetChange: (budget: number | null) => void;
 }
 
 const MAX_IMAGES = 3;
@@ -26,10 +31,31 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+function parseSseChunk(
+  chunk: string
+): { event: string; data: unknown } | null {
+  let event: string | null = null;
+  let data: string | null = null;
+  for (const line of chunk.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data = line.slice(5).trim();
+  }
+  if (!event || data === null) return null;
+  try {
+    return { event, data: JSON.parse(data) };
+  } catch {
+    return null;
+  }
+}
+
 export default function ImageUploader({
-  onResult,
-  onLoading,
-  onError,
+  onStart,
+  onAnalysis,
+  onAnalysisError,
+  onProduct,
+  onProductsError,
+  onShared,
+  onComplete,
   disabled = false,
   compact = false,
   budget,
@@ -41,12 +67,19 @@ export default function ImageUploader({
   const [isDragging, setIsDragging] = useState(false);
   const [dimensions, setDimensions] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     return () => {
       previews.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [previews]);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const processFiles = useCallback(
     (selected: File[]) => {
@@ -103,12 +136,9 @@ export default function ImageUploader({
     [disabled, files.length]
   );
 
-  const handleDragOver = useCallback(
-    (e: React.DragEvent<HTMLLabelElement>) => {
-      e.preventDefault();
-    },
-    []
-  );
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLLabelElement>) => {
+    e.preventDefault();
+  }, []);
 
   const handleDragLeave = useCallback(
     (e: React.DragEvent<HTMLLabelElement>) => {
@@ -142,60 +172,97 @@ export default function ImageUploader({
   const handleAnalyze = useCallback(async () => {
     if (files.length === 0) return;
 
-    onLoading(true);
-    onError(null);
+    onStart();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    let gotAnalysis = false;
 
     try {
       const dataUrls = await Promise.all(files.map(fileToDataUrl));
       const trimmedDimensions = dimensions.trim();
-      const res = await fetch("/api/analyze", {
+      const res = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: ac.signal,
         body: JSON.stringify({
           images: dataUrls,
           ...(trimmedDimensions ? { dimensions: trimmedDimensions } : {}),
+          ...(budget ? { budget } : {}),
         }),
       });
 
-      const payload: RoomAnalysis | AnalyzeError = await res.json();
-
-      if (!res.ok) {
-        const errorPayload = payload as AnalyzeError;
-        onError({
-          message: errorPayload.error ?? "Errore sconosciuto",
-          code: errorPayload.code,
-        });
+      if (!res.ok || !res.body) {
+        let message = "Errore di rete";
+        let code: string | undefined;
+        try {
+          const j = await res.json();
+          message = j.error ?? message;
+          code = j.code;
+        } catch {
+          /* corpo non JSON */
+        }
+        onAnalysisError({ message, code });
         return;
       }
 
-      const analysis = payload as RoomAnalysis;
-      if (
-        !Array.isArray(analysis.colors) ||
-        typeof analysis.style !== "string" ||
-        typeof analysis.dimensions !== "string" ||
-        !["low", "medium", "high"].includes(analysis.confidence)
-      ) {
-        onError({
-          message: "Risposta server non conforme allo schema atteso",
-        });
-        return;
-      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
 
-      onResult(analysis);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          const ev = parseSseChunk(chunk);
+          if (!ev) continue;
+          if (ev.event === "analysis") {
+            gotAnalysis = true;
+            onAnalysis(ev.data as RoomAnalysis);
+          } else if (ev.event === "product") {
+            onProduct(ev.data as Product);
+          } else if (ev.event === "shared") {
+            onShared((ev.data as { id: string }).id);
+          } else if (ev.event === "error") {
+            const err = ev.data as { code?: string; message: string };
+            if (err.code === "NOT_A_ROOM" || !gotAnalysis) {
+              onAnalysisError({ message: err.message, code: err.code });
+            } else {
+              onProductsError({ message: err.message, code: err.code });
+            }
+          }
+        }
+      }
     } catch (err) {
-      onError({
+      if ((err as Error).name === "AbortError") return;
+      onAnalysisError({
         message: err instanceof Error ? err.message : "Errore di rete",
       });
     } finally {
-      onLoading(false);
+      onComplete();
+      abortRef.current = null;
     }
-  }, [files, dimensions, onLoading, onError, onResult]);
+  }, [
+    files,
+    dimensions,
+    budget,
+    onStart,
+    onAnalysis,
+    onAnalysisError,
+    onProduct,
+    onProductsError,
+    onShared,
+    onComplete,
+  ]);
 
   const handleBudgetChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const v = e.target.value;
-      if (v === "") onBudgetChange(null);
-      else if (isBudget(v)) onBudgetChange(v);
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const v = e.target.value.trim();
+      if (v === "") return onBudgetChange(null);
+      const n = Number(v);
+      onBudgetChange(Number.isFinite(n) && n > 0 ? n : null);
     },
     [onBudgetChange]
   );
@@ -328,20 +395,17 @@ export default function ImageUploader({
               Budget per pezzo{" "}
               <span className="text-brand-text-muted">(opzionale)</span>
             </label>
-            <select
+            <input
               id="room-budget"
+              type="number"
+              inputMode="numeric"
+              min={1}
               value={budget ?? ""}
               onChange={handleBudgetChange}
+              placeholder="es. 150"
               disabled={disabled}
-              className="w-full rounded-lg border border-brand-border bg-white px-3 py-2 text-sm text-brand-text disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <option value="">Nessun budget</option>
-              {BUDGET_OPTIONS.map((b) => (
-                <option key={b} value={b}>
-                  {BUDGET_LABELS[b]}
-                </option>
-              ))}
-            </select>
+              className="w-full rounded-lg border border-brand-border bg-white px-3 py-2 text-sm text-brand-text placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50"
+            />
           </div>
         </div>
 

@@ -1,13 +1,12 @@
 import { SchemaType, type ResponseSchema } from "@google/generative-ai";
-import { budgetToHint } from "./budget";
-import type { Budget } from "./types";
+import { budgetHint } from "./budget";
 
-export const SYSTEM_INSTRUCTION = `Sei un interior designer esperto. Analizza le foto di una stanza fornite dall'utente e produci un oggetto JSON conforme allo schema richiesto. Linee guida:
-- "colors": 3-5 colori dominanti come stringhe HEX (#RRGGBB maiuscolo)
-- "style": breve descrizione dello stile in italiano (max 80 caratteri)
-- "dimensions": stima delle dimensioni percepite della stanza in italiano (es. "circa 15-20 m², soffitto standard ~2.7m")
-- "confidence": "low" se le foto non mostrano chiaramente una stanza o sono ambigue, "medium" se l'analisi è plausibile, "high" se la stanza è ben visibile e leggibile
-Se le immagini non rappresentano una stanza, ritorna confidence "low", style "non determinabile" e dimensioni "non determinabili".`;
+export const SYSTEM_INSTRUCTION = `Sei un interior designer. Analizza le foto della stanza e produci SOLO il JSON dello schema:
+- colors: 3-5 HEX dominanti (#RRGGBB maiuscolo)
+- style: stile in italiano, max 80 caratteri
+- dimensions: dimensioni stimate in italiano (es. "circa 15-20 m², soffitto ~2.7m")
+- confidence: "high" se la stanza è chiara, "medium" se plausibile, "low" se ambigua
+Se le foto NON mostrano una stanza: confidence "low", style "non determinabile", dimensions "non determinabili".`;
 
 export const ROOM_ANALYSIS_SCHEMA: ResponseSchema = {
   type: SchemaType.OBJECT,
@@ -46,7 +45,7 @@ Regole fondamentali:
 2. LINGUAGGIO STILISTICO CONDIVISO: prima definisci mentalmente un filo conduttore comune a tutti i pezzi — stessi materiali (es. legno chiaro + lino), stessa palette (coerente coi colori della stanza), stesse forme (es. linee morbide o geometrie nette). Tutti i pezzi devono sembrare scelti dalla stessa persona per la stessa stanza.
 3. QUERY COERENTI: ogni "query" (italiano, max 70 caratteri, per Google Shopping) deve includere materiali/finiture/colori del filo conduttore condiviso, così che i pezzi si richiamino visivamente (es. se il filo è "legno chiaro + nero opaco", la lampada sarà "lampada terra metallo nero opaco" e il tavolino "tavolino legno chiaro gambe nere").
 4. DIMENSIONI: adatta le proposte allo spazio (stanza piccola → niente mobili ingombranti).
-5. BUDGET: se indicato, rispetta la fascia e includi l'indicazione di prezzo nella query (es. "tappeto geometrico sotto 200€").
+5. BUDGET: se indicato un massimo per pezzo, resta entro quella cifra e includi il prezzo nella query (es. "tappeto geometrico sotto 150€").
 
 "category" = nome breve della categoria in italiano (es. "Lampada da terra").
 Ritorna ESCLUSIVAMENTE un JSON conforme allo schema.`;
@@ -69,16 +68,30 @@ export const FURNITURE_PLAN_SCHEMA: ResponseSchema = {
   required: ["items"],
 };
 
+export const IMAGE_PLAN_SYSTEM_INSTRUCTION = `Sei un interior designer. Osserva le foto della stanza (stile, colori, materiali, dimensioni) e proponi 3-5 pezzi d'arredo che formino un INSIEME COERENTE.
+Regole:
+1. Categorie diverse (divano, poltrona, sedia, tavolo, tavolino, lampada, tappeto, libreria, pianta, vaso, quadro, specchio, tenda, cuscino, complemento): mai due della stessa categoria.
+2. Filo conduttore condiviso: tutti i pezzi condividono materiali, palette e forme coerenti tra loro e con la stanza.
+3. Ogni "query" (italiano, max 70 caratteri, per Google Shopping) include i materiali/colori del filo conduttore, così i pezzi si richiamano (es. filo "legno chiaro+nero opaco" → "lampada terra metallo nero opaco", "tavolino legno chiaro gambe nere").
+4. Adatta allo spazio: stanza piccola → niente mobili ingombranti.
+5. Budget (se indicato): resta entro il budget massimo per pezzo e metti il prezzo nella query (es. "tappeto geometrico sotto 150€").
+"category" = nome breve in italiano. Ritorna SOLO il JSON dello schema.`;
+
+export function buildImagePlanPrompt(budgetMax?: number): string {
+  const budgetLine = budgetMax ? ` Budget ${budgetHint(budgetMax)}.` : "";
+  return `Analizza queste foto e proponi 3-5 pezzi d'arredo coerenti tra loro.${budgetLine}`;
+}
+
 export function buildFurniturePrompt(
   analysis: {
     colors: string[];
     style: string;
     dimensions: string;
   },
-  budget?: Budget
+  budgetMax?: number
 ): string {
-  const budgetLine = budget
-    ? `\n- Budget per singolo pezzo: ${budgetToHint(budget)}`
+  const budgetLine = budgetMax
+    ? `\n- Budget per singolo pezzo: ${budgetHint(budgetMax)}`
     : "";
   return `Analisi della stanza:
 - Stile: ${analysis.style}

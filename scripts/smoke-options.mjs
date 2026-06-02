@@ -32,7 +32,7 @@ if (existsSync("test-room.jpg")) {
   await call(ANALYZE, { images: [dataUrl], dimensions: "3x4 metri, soffitto 2.5m" }, "analyze con dims");
 }
 
-console.log("\n=== PRODUCTS CON BUDGET economico ===");
+console.log("\n=== PRODUCTS CON BUDGET 150€ ===");
 await call(PRODUCTS, {
   analysis: {
     colors: ["#F8F8F8", "#CF1D2D", "#B0744D"],
@@ -40,10 +40,10 @@ await call(PRODUCTS, {
     dimensions: "circa 20 m²",
     confidence: "high",
   },
-  budget: "economico",
-}, "products budget economico");
+  budget: 150,
+}, "products budget 150");
 
-console.log("\n=== PRODUCTS CON BUDGET lusso ===");
+console.log("\n=== PRODUCTS CON BUDGET 1200€ ===");
 await call(PRODUCTS, {
   analysis: {
     colors: ["#1F1B17", "#FAF7F2"],
@@ -51,5 +51,5 @@ await call(PRODUCTS, {
     dimensions: "circa 30 m²",
     confidence: "high",
   },
-  budget: "lusso",
-}, "products budget lusso");
+  budget: 1200,
+}, "products budget 1200");
