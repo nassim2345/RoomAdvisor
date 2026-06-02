@@ -9,51 +9,57 @@ export default function ProductsPanel({ products }: ProductsPanelProps) {
 
   if (products.length === 0) {
     return (
-      <section className="w-full max-w-4xl rounded-lg border border-gray-200 bg-white p-6 text-center text-gray-500">
+      <section className="w-full rounded-2xl border border-brand-border bg-brand-surface p-8 text-center text-brand-text-muted">
         Nessun prodotto trovato per le categorie suggerite.
       </section>
     );
   }
 
   return (
-    <section className="w-full max-w-4xl">
-      <h2 className="mb-4 text-2xl font-semibold text-gray-900">
+    <section className="w-full">
+      <h2 className="mb-6 text-xl font-semibold tracking-tight text-brand-text sm:text-2xl">
         Pezzi consigliati
       </h2>
-      <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <ul className="grid grid-cols-1 gap-5 sm:grid-cols-2">
         {products.map((p, i) => (
           <li
             key={`${p.category}-${i}`}
-            className="flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
+            className="group flex h-full flex-col overflow-hidden rounded-2xl border border-brand-border bg-brand-surface shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-brand-text/20 hover:shadow-md"
           >
-            <div className="flex aspect-square items-center justify-center bg-gray-100">
+            <div className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-brand-muted">
               {p.thumbnail ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img
                   src={p.thumbnail}
                   alt={p.name}
-                  className="h-full w-full object-contain"
+                  className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
                   loading="lazy"
                 />
               ) : (
-                <span className="text-sm text-gray-400">Nessuna immagine</span>
+                <span className="text-sm text-brand-text-muted">
+                  Nessuna immagine
+                </span>
               )}
             </div>
-            <div className="flex flex-1 flex-col gap-2 p-4">
-              <span className="inline-block w-fit rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-gray-600">
+            <div className="flex min-h-0 flex-1 flex-col gap-3 p-5">
+              <span className="inline-block w-fit rounded-full bg-brand-muted px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-brand-text-muted">
                 {p.category}
               </span>
-              <h3 className="line-clamp-2 text-sm font-medium text-gray-900">
+              <h3 className="line-clamp-2 text-sm font-medium leading-snug text-brand-text">
                 {p.name}
               </h3>
-              <p className="text-base font-semibold text-gray-900">
-                {p.price ?? "Prezzo non disponibile"}
+              <p className="text-lg font-semibold tracking-tight text-brand-text">
+                {p.price ?? (
+                  <span className="text-sm font-normal text-brand-text-muted">
+                    Prezzo non disponibile
+                  </span>
+                )}
               </p>
               <a
                 href={p.link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-auto inline-flex items-center justify-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                className="mt-auto inline-flex items-center justify-center rounded-lg bg-[#2A2622] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-[#0F0D0B] hover:shadow"
               >
                 Acquista
               </a>

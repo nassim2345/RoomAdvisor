@@ -1,13 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AnalyzeError, RoomAnalysis } from "@/lib/types";
+import { BUDGET_LABELS, BUDGET_OPTIONS, isBudget } from "@/lib/budget";
+import type { AnalyzeError, Budget, RoomAnalysis } from "@/lib/types";
 
 interface ImageUploaderProps {
   onResult: (analysis: RoomAnalysis) => void;
   onLoading: (loading: boolean) => void;
   onError: (error: { message: string; code?: string } | null) => void;
   disabled?: boolean;
+  compact?: boolean;
+  budget: Budget | null;
+  onBudgetChange: (budget: Budget | null) => void;
 }
 
 const MAX_IMAGES = 3;
@@ -27,10 +31,15 @@ export default function ImageUploader({
   onLoading,
   onError,
   disabled = false,
+  compact = false,
+  budget,
+  onBudgetChange,
 }: ImageUploaderProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
   const [warning, setWarning] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dimensions, setDimensions] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -39,14 +48,20 @@ export default function ImageUploader({
     };
   }, [previews]);
 
-  const handleSelect = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const selected = Array.from(e.target.files ?? []);
+  const processFiles = useCallback(
+    (selected: File[]) => {
       if (selected.length === 0) return;
 
+      const onlyImages = selected.filter((f) => f.type.startsWith("image/"));
+      if (onlyImages.length === 0) {
+        setWarning("Sono ammessi solo file immagine.");
+        return;
+      }
+
       const availableSlots = MAX_IMAGES - files.length;
-      const accepted = selected.slice(0, availableSlots);
-      const rejected = selected.length - accepted.length;
+      const accepted = onlyImages.slice(0, availableSlots);
+      const overCap = onlyImages.length - accepted.length;
+      const nonImages = selected.length - onlyImages.length;
 
       const oversized = accepted.find((f) => f.size > SOFT_MAX_BYTES);
       if (oversized) {
@@ -60,15 +75,58 @@ export default function ImageUploader({
       const newPreviews = accepted.map((f) => URL.createObjectURL(f));
       setFiles((prev) => [...prev, ...accepted]);
       setPreviews((prev) => [...prev, ...newPreviews]);
-      setWarning(
-        rejected > 0
-          ? `Massimo ${MAX_IMAGES} immagini: ${rejected} scartate.`
-          : null
-      );
+
+      const parts: string[] = [];
+      if (overCap > 0)
+        parts.push(`${overCap} immagini oltre il limite di ${MAX_IMAGES}`);
+      if (nonImages > 0) parts.push(`${nonImages} file non immagine ignorati`);
+      setWarning(parts.length > 0 ? `Scartati: ${parts.join(", ")}.` : null);
 
       if (inputRef.current) inputRef.current.value = "";
     },
     [files.length]
+  );
+
+  const handleSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      processFiles(Array.from(e.target.files ?? []));
+    },
+    [processFiles]
+  );
+
+  const handleDragEnter = useCallback(
+    (e: React.DragEvent<HTMLLabelElement>) => {
+      e.preventDefault();
+      if (disabled || files.length >= MAX_IMAGES) return;
+      setIsDragging(true);
+    },
+    [disabled, files.length]
+  );
+
+  const handleDragOver = useCallback(
+    (e: React.DragEvent<HTMLLabelElement>) => {
+      e.preventDefault();
+    },
+    []
+  );
+
+  const handleDragLeave = useCallback(
+    (e: React.DragEvent<HTMLLabelElement>) => {
+      const next = e.relatedTarget as Node | null;
+      if (next && e.currentTarget.contains(next)) return;
+      setIsDragging(false);
+    },
+    []
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent<HTMLLabelElement>) => {
+      e.preventDefault();
+      setIsDragging(false);
+      if (disabled) return;
+      processFiles(Array.from(e.dataTransfer.files ?? []));
+    },
+    [disabled, processFiles]
   );
 
   const handleRemove = useCallback(
@@ -89,10 +147,14 @@ export default function ImageUploader({
 
     try {
       const dataUrls = await Promise.all(files.map(fileToDataUrl));
+      const trimmedDimensions = dimensions.trim();
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ images: dataUrls }),
+        body: JSON.stringify({
+          images: dataUrls,
+          ...(trimmedDimensions ? { dimensions: trimmedDimensions } : {}),
+        }),
       });
 
       const payload: RoomAnalysis | AnalyzeError = await res.json();
@@ -127,22 +189,55 @@ export default function ImageUploader({
     } finally {
       onLoading(false);
     }
-  }, [files, onLoading, onError, onResult]);
+  }, [files, dimensions, onLoading, onError, onResult]);
+
+  const handleBudgetChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const v = e.target.value;
+      if (v === "") onBudgetChange(null);
+      else if (isBudget(v)) onBudgetChange(v);
+    },
+    [onBudgetChange]
+  );
 
   const canAddMore = files.length < MAX_IMAGES;
   const canAnalyze = files.length > 0 && !disabled;
+  const dropAreaLocked = !canAddMore || disabled;
+
+  const dropAreaClasses = [
+    "flex flex-col items-center justify-center gap-2 rounded-2xl border-2 px-6 py-10 text-center transition-colors",
+    isDragging
+      ? "border-solid border-[#2A2622] bg-brand-muted/60"
+      : "border-dashed border-brand-border bg-brand-surface hover:border-brand-text/30 hover:bg-brand-muted/30",
+    dropAreaLocked ? "pointer-events-none opacity-50" : "cursor-pointer",
+  ].join(" ");
 
   return (
-    <div className="w-full max-w-2xl space-y-4">
-      <div>
+    <div className="w-full rounded-2xl border border-brand-border bg-brand-surface p-6 shadow-sm">
+      <h2 className="mb-5 text-xl font-semibold tracking-tight text-brand-text sm:text-2xl">
+        Le tue foto
+      </h2>
+
+      <div className="space-y-5">
         <label
-          className={`inline-block cursor-pointer rounded-md border border-dashed border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 hover:border-gray-500 hover:bg-gray-50 ${
-            !canAddMore || disabled ? "pointer-events-none opacity-50" : ""
-          }`}
+          className={dropAreaClasses}
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
         >
-          {canAddMore
-            ? `Seleziona foto (${files.length}/${MAX_IMAGES})`
-            : `Limite raggiunto (${MAX_IMAGES}/${MAX_IMAGES})`}
+          <span className="text-base font-medium text-brand-text">
+            {isDragging
+              ? "Rilascia qui le foto"
+              : canAddMore
+                ? "Trascina o seleziona le foto della tua stanza"
+                : "Limite raggiunto"}
+          </span>
+          <span className="text-sm text-brand-text-muted">
+            {canAddMore
+              ? `JPG o PNG, max ${MAX_IMAGES} immagini (${files.length}/${MAX_IMAGES} selezionate)`
+              : `${MAX_IMAGES}/${MAX_IMAGES} immagini caricate`}
+          </span>
           <input
             ref={inputRef}
             type="file"
@@ -153,45 +248,114 @@ export default function ImageUploader({
             disabled={!canAddMore || disabled}
           />
         </label>
+
         {warning && (
-          <p className="mt-2 text-sm text-amber-700">{warning}</p>
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {warning}
+          </p>
         )}
-      </div>
 
-      {previews.length > 0 && (
-        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {previews.map((src, i) => (
-            <li
-              key={src}
-              className="relative overflow-hidden rounded-md border border-gray-200"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={src}
-                alt={`Anteprima ${i + 1}`}
-                className="aspect-square w-full object-cover"
-              />
-              <button
-                type="button"
-                onClick={() => handleRemove(i)}
-                disabled={disabled}
-                className="absolute right-1 top-1 rounded-full bg-black/60 px-2 py-1 text-xs text-white hover:bg-black/80 disabled:opacity-50"
-              >
-                Rimuovi
-              </button>
-            </li>
+        {previews.length > 0 &&
+          (compact ? (
+            <ul className="flex flex-wrap gap-2">
+              {previews.map((src, i) => (
+                <li
+                  key={src}
+                  className="overflow-hidden rounded-lg border border-brand-border bg-brand-surface"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt={`Foto caricata ${i + 1}`}
+                    className="h-16 w-16 object-cover"
+                  />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {previews.map((src, i) => (
+                <li
+                  key={src}
+                  className="group relative overflow-hidden rounded-xl border border-brand-border bg-brand-surface"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={src}
+                    alt={`Anteprima ${i + 1}`}
+                    className="aspect-square w-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(i)}
+                    disabled={disabled}
+                    aria-label={`Rimuovi immagine ${i + 1}`}
+                    className="absolute right-2 top-2 rounded-full bg-[#2A2622]/80 px-2.5 py-1 text-xs font-medium text-white opacity-0 backdrop-blur-sm transition-opacity hover:bg-[#2A2622] group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50"
+                  >
+                    Rimuovi
+                  </button>
+                </li>
+              ))}
+            </ul>
           ))}
-        </ul>
-      )}
 
-      <button
-        type="button"
-        onClick={handleAnalyze}
-        disabled={!canAnalyze}
-        className="rounded-md bg-gray-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {disabled ? "Analisi in corso..." : "Analizza"}
-      </button>
+        <div className="space-y-3">
+          <div>
+            <label
+              htmlFor="room-dimensions"
+              className="mb-1.5 block text-sm font-medium text-brand-text"
+            >
+              Dimensioni stanza{" "}
+              <span className="text-brand-text-muted">(opzionale)</span>
+            </label>
+            <input
+              id="room-dimensions"
+              type="text"
+              value={dimensions}
+              onChange={(e) => setDimensions(e.target.value)}
+              placeholder="es. 4x5 metri"
+              maxLength={50}
+              disabled={disabled}
+              className="w-full rounded-lg border border-brand-border bg-white px-3 py-2 text-sm text-brand-text placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="room-budget"
+              className="mb-1.5 block text-sm font-medium text-brand-text"
+            >
+              Budget per pezzo{" "}
+              <span className="text-brand-text-muted">(opzionale)</span>
+            </label>
+            <select
+              id="room-budget"
+              value={budget ?? ""}
+              onChange={handleBudgetChange}
+              disabled={disabled}
+              className="w-full rounded-lg border border-brand-border bg-white px-3 py-2 text-sm text-brand-text disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="">Nessun budget</option>
+              {BUDGET_OPTIONS.map((b) => (
+                <option key={b} value={b}>
+                  {BUDGET_LABELS[b]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex justify-center sm:justify-start">
+          <button
+            type="button"
+            onClick={handleAnalyze}
+            disabled={!canAnalyze}
+            className="inline-flex w-full items-center justify-center rounded-lg bg-[#2A2622] px-6 py-3 text-sm font-semibold text-white shadow-sm transition-all hover:bg-[#0F0D0B] hover:shadow disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+          >
+            {disabled ? "Analisi in corso..." : "Analizza la stanza"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

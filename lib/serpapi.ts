@@ -1,4 +1,4 @@
-import type { Product } from "./types";
+import type { PriceRange, Product } from "./types";
 
 interface SerpShoppingResult {
   title?: string;
@@ -24,9 +24,17 @@ export class SerpApiError extends Error {
   }
 }
 
+function buildTbs(range: PriceRange): string | null {
+  const parts: string[] = ["mr:1", "price:1"];
+  if (range.min !== undefined) parts.push(`ppr_min:${range.min}`);
+  if (range.max !== undefined) parts.push(`ppr_max:${range.max}`);
+  return parts.length > 2 ? parts.join(",") : null;
+}
+
 export async function searchShopping(
   query: string,
-  category: string
+  category: string,
+  priceRange?: PriceRange
 ): Promise<Product | null> {
   const apiKey = process.env.SERPAPI_KEY;
   if (!apiKey) {
@@ -39,6 +47,10 @@ export async function searchShopping(
   url.searchParams.set("hl", "it");
   url.searchParams.set("gl", "it");
   url.searchParams.set("api_key", apiKey);
+  if (priceRange) {
+    const tbs = buildTbs(priceRange);
+    if (tbs) url.searchParams.set("tbs", tbs);
+  }
 
   const res = await fetch(url.toString());
   if (!res.ok) {

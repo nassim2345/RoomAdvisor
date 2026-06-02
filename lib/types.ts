@@ -15,6 +15,7 @@ export interface FurnitureSuggestion {
 
 export interface AnalyzeRequest {
   images: string[];
+  dimensions?: string;
 }
 
 export type AnalyzeResponse = RoomAnalysis;
@@ -44,8 +45,16 @@ export interface Product {
   thumbnail: string | null;
 }
 
+export type Budget = "economico" | "medio" | "alto" | "lusso";
+
+export interface PriceRange {
+  min?: number;
+  max?: number;
+}
+
 export interface ProductsRequest {
   analysis: RoomAnalysis;
+  budget?: Budget;
 }
 
 export interface ProductsResponse {

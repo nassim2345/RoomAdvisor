@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { BUDGET_RANGES, isBudget } from "@/lib/budget";
 import { getPlanningModel } from "@/lib/gemini";
 import { buildFurniturePrompt } from "@/lib/prompts";
 import { SerpApiError, searchShopping } from "@/lib/serpapi";
 import type {
+  Budget,
   FurnitureQuery,
   Product,
   ProductsError,
@@ -52,11 +54,24 @@ export async function POST(req: Request) {
     );
   }
 
+  let budget: Budget | undefined;
+  if (body.budget !== undefined) {
+    if (!isBudget(body.budget)) {
+      return errorResponse(
+        "INVALID_INPUT",
+        'Campo "budget" non valido (atteso: economico, medio, alto, lusso)',
+        400
+      );
+    }
+    budget = body.budget;
+  }
+  const priceRange = budget ? BUDGET_RANGES[budget] : undefined;
+
   let plan: FurnitureQuery[];
   try {
     const model = getPlanningModel();
     const result = await model.generateContent(
-      buildFurniturePrompt(body.analysis)
+      buildFurniturePrompt(body.analysis, budget)
     );
     const parsed = JSON.parse(result.response.text()) as {
       items: FurnitureQuery[];
@@ -92,7 +107,7 @@ export async function POST(req: Request) {
   }
 
   const settled = await Promise.allSettled(
-    plan.map((item) => searchShopping(item.query, item.category))
+    plan.map((item) => searchShopping(item.query, item.category, priceRange))
   );
 
   const products: Product[] = [];

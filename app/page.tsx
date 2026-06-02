@@ -4,7 +4,9 @@ import { useState } from "react";
 import ImageUploader from "@/components/ImageUploader";
 import ProductsPanel from "@/components/ProductsPanel";
 import ResultsPanel from "@/components/ResultsPanel";
+import { AnalysisSkeleton, ProductsSkeleton } from "@/components/Skeleton";
 import type {
+  Budget,
   Product,
   ProductsError,
   ProductsResponse,
@@ -12,6 +14,26 @@ import type {
 } from "@/lib/types";
 
 type AppError = { message: string; code?: string } | null;
+
+function ErrorBanner({ title, error }: { title: string; error: AppError }) {
+  if (!error) return null;
+  return (
+    <div
+      role="alert"
+      className="w-full rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+    >
+      <div className="flex items-center gap-2">
+        <strong className="font-semibold">{title}</strong>
+        {error.code && (
+          <span className="rounded bg-red-100 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider">
+            {error.code}
+          </span>
+        )}
+      </div>
+      <p className="mt-1 leading-relaxed">{error.message}</p>
+    </div>
+  );
+}
 
 export default function Home() {
   const [analysis, setAnalysis] = useState<RoomAnalysis | null>(null);
@@ -22,6 +44,8 @@ export default function Home() {
   const [productsLoading, setProductsLoading] = useState(false);
   const [productsError, setProductsError] = useState<AppError>(null);
 
+  const [budget, setBudget] = useState<Budget | null>(null);
+
   async function fetchProducts(roomAnalysis: RoomAnalysis) {
     setProductsLoading(true);
     setProductsError(null);
@@ -30,7 +54,10 @@ export default function Home() {
       const res = await fetch("/api/products", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ analysis: roomAnalysis }),
+        body: JSON.stringify({
+          analysis: roomAnalysis,
+          ...(budget ? { budget } : {}),
+        }),
       });
       const payload: ProductsResponse | ProductsError = await res.json();
       if (!res.ok) {
@@ -51,80 +78,68 @@ export default function Home() {
     }
   }
 
+  const hasResults =
+    analysis !== null ||
+    analysisLoading ||
+    productsLoading ||
+    products !== null ||
+    productsError !== null;
+
+  const uploader = (
+    <ImageUploader
+      onResult={(a) => {
+        setAnalysis(a);
+        setAnalysisError(null);
+        fetchProducts(a);
+      }}
+      onLoading={setAnalysisLoading}
+      onError={setAnalysisError}
+      disabled={analysisLoading}
+      compact={analysis !== null || analysisLoading}
+      budget={budget}
+      onBudgetChange={setBudget}
+    />
+  );
+
   return (
-    <main className="flex min-h-screen flex-col items-center gap-8 bg-gray-50 px-4 py-12">
-      <header className="text-center">
-        <h1 className="text-4xl font-bold text-gray-900">RoomAdvisor</h1>
-        <p className="mt-2 text-lg text-gray-600">
-          Carica 1-3 foto della tua stanza per analizzarne colori, stile e
-          dimensioni.
-        </p>
-      </header>
-
-      <ImageUploader
-        onResult={(a) => {
-          setAnalysis(a);
-          setAnalysisError(null);
-          fetchProducts(a);
-        }}
-        onLoading={setAnalysisLoading}
-        onError={setAnalysisError}
-        disabled={analysisLoading}
-      />
-
-      {analysisLoading && (
-        <div className="flex items-center gap-3 text-gray-600">
-          <span
-            aria-hidden
-            className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900"
-          />
-          <span>Analisi in corso...</span>
+    <main className="min-h-screen bg-brand-bg">
+      <nav className="sticky top-0 z-50 h-14 border-b border-brand-border bg-brand-surface">
+        <div className="mx-auto flex h-full w-full max-w-7xl items-center px-4 sm:px-6 lg:px-8">
+          <span className="text-lg font-semibold tracking-tight text-brand-text">
+            RoomAdvisor
+          </span>
         </div>
-      )}
+      </nav>
 
-      {analysisError && (
-        <div
-          role="alert"
-          className="w-full max-w-2xl rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
-        >
-          <strong className="font-semibold">Errore analisi</strong>
-          {analysisError.code && (
-            <span className="ml-2 rounded bg-red-100 px-2 py-0.5 font-mono text-xs">
-              {analysisError.code}
-            </span>
-          )}
-          <p className="mt-1">{analysisError.message}</p>
-        </div>
-      )}
+      <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
+        {!hasResults ? (
+          <div className="flex justify-center">{uploader}</div>
+        ) : (
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] lg:items-start">
+            <aside className="flex flex-col gap-6 lg:sticky lg:top-[72px] lg:max-h-[calc(100vh-88px)] lg:overflow-y-auto lg:pr-2">
+              {uploader}
+              <ErrorBanner title="Errore analisi" error={analysisError} />
+              {analysisLoading ? (
+                <AnalysisSkeleton />
+              ) : (
+                <ResultsPanel analysis={analysis} />
+              )}
+            </aside>
 
-      <ResultsPanel analysis={analysis} />
-
-      {productsLoading && (
-        <div className="flex items-center gap-3 text-gray-600">
-          <span
-            aria-hidden
-            className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900"
-          />
-          <span>Cerco prodotti consigliati...</span>
-        </div>
-      )}
-
-      {productsError && (
-        <div
-          role="alert"
-          className="w-full max-w-2xl rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
-        >
-          <strong className="font-semibold">Errore ricerca prodotti</strong>
-          {productsError.code && (
-            <span className="ml-2 rounded bg-red-100 px-2 py-0.5 font-mono text-xs">
-              {productsError.code}
-            </span>
-          )}
-          <p className="mt-1">{productsError.message}</p>
-        </div>
-      )}
-
-      <ProductsPanel products={products} />
+            <section className="flex flex-col gap-6">
+              <ErrorBanner
+                title="Errore ricerca prodotti"
+                error={productsError}
+              />
+              {productsLoading ? (
+                <ProductsSkeleton />
+              ) : (
+                <ProductsPanel products={products} />
+              )}
+            </section>
+          </div>
+        )}
+      </div>
     </main>
   );
 }

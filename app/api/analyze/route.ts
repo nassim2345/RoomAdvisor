@@ -46,9 +46,12 @@ export async function POST(req: Request) {
     );
   }
 
+  const dimensions =
+    typeof body.dimensions === "string" ? body.dimensions : undefined;
+
   const parts: Array<
     { text: string } | { inlineData: { mimeType: string; data: string } }
-  > = [{ text: buildUserPrompt(body.images.length) }];
+  > = [{ text: buildUserPrompt(body.images.length, dimensions) }];
   let totalBytes = 0;
 
   for (let i = 0; i < body.images.length; i++) {

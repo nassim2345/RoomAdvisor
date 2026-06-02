@@ -1,4 +1,6 @@
 import { SchemaType, type ResponseSchema } from "@google/generative-ai";
+import { budgetToHint } from "./budget";
+import type { Budget } from "./types";
 
 export const SYSTEM_INSTRUCTION = `Sei un interior designer esperto. Analizza le foto di una stanza fornite dall'utente e produci un oggetto JSON conforme allo schema richiesto. Linee guida:
 - "colors": 3-5 colori dominanti come stringhe HEX (#RRGGBB maiuscolo)
@@ -25,16 +27,24 @@ export const ROOM_ANALYSIS_SCHEMA: ResponseSchema = {
   required: ["colors", "style", "dimensions", "confidence"],
 };
 
-export function buildUserPrompt(imageCount: number): string {
+export function buildUserPrompt(
+  imageCount: number,
+  dimensions?: string
+): string {
   const plural = imageCount === 1 ? "questa foto" : `queste ${imageCount} foto`;
-  return `Analizza ${plural} della stessa stanza e produci il JSON richiesto.`;
+  const dimsLine =
+    dimensions && dimensions.trim().length > 0
+      ? `\nL'utente dichiara dimensioni reali della stanza: "${dimensions.trim()}". Usa questo dato come fonte primaria invece di stimare visivamente.`
+      : "";
+  return `Analizza ${plural} della stessa stanza e produci il JSON richiesto.${dimsLine}`;
 }
 
-export const FURNITURE_SYSTEM_INSTRUCTION = `Sei un interior designer. Data l'analisi di una stanza (colori, stile, dimensioni), proponi 3-5 pezzi d'arredo DIVERSI per CATEGORIA che si abbinino allo stile e ai colori. Linee guida:
+export const FURNITURE_SYSTEM_INSTRUCTION = `Sei un interior designer. Data l'analisi di una stanza (colori, stile, dimensioni) e un eventuale budget per singolo pezzo, proponi 3-5 pezzi d'arredo DIVERSI per CATEGORIA che si abbinino allo stile e ai colori. Linee guida:
 - Categorie suggerite (scegline 3-5 diverse): divano, poltrona, sedia, tavolo, tavolino, lampada da terra, lampada da tavolo, tappeto, libreria, scaffale, pianta, vaso, quadro, specchio, tenda, cuscino, complemento.
 - Evita di consigliare più oggetti della stessa categoria.
-- Per ogni pezzo produci una "query" di ricerca in italiano per Google Shopping (max 60 caratteri), specifica e coerente con lo stile (es. "lampada da terra legno chiaro stile scandinavo").
+- Per ogni pezzo produci una "query" di ricerca in italiano per Google Shopping (max 70 caratteri), specifica e coerente con lo stile (es. "lampada da terra legno chiaro stile scandinavo").
 - Adatta le proposte alle dimensioni: stanza piccola → niente mobili ingombranti.
+- Se è indicato un budget, scegli categorie e marchi coerenti con quella fascia e includi l'indicazione di prezzo nella query (es. "tappeto moderno geometrico sotto 200€").
 - "category" è il nome breve della categoria in italiano (es. "Lampada da terra").
 Ritorna ESCLUSIVAMENTE un JSON conforme allo schema.`;
 
@@ -56,15 +66,21 @@ export const FURNITURE_PLAN_SCHEMA: ResponseSchema = {
   required: ["items"],
 };
 
-export function buildFurniturePrompt(analysis: {
-  colors: string[];
-  style: string;
-  dimensions: string;
-}): string {
+export function buildFurniturePrompt(
+  analysis: {
+    colors: string[];
+    style: string;
+    dimensions: string;
+  },
+  budget?: Budget
+): string {
+  const budgetLine = budget
+    ? `\n- Budget per singolo pezzo: ${budgetToHint(budget)}`
+    : "";
   return `Analisi della stanza:
 - Stile: ${analysis.style}
 - Colori dominanti: ${analysis.colors.join(", ")}
-- Dimensioni: ${analysis.dimensions}
+- Dimensioni: ${analysis.dimensions}${budgetLine}
 
 Proponi 3-5 pezzi d'arredo coerenti.`;
 }
