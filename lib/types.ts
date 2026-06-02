@@ -7,19 +7,6 @@ export interface RoomAnalysis {
   confidence: Confidence;
 }
 
-export interface FurnitureSuggestion {
-  name: string;
-  description: string;
-  purchaseUrl: string;
-}
-
-export interface AnalyzeRequest {
-  images: string[];
-  dimensions?: string;
-}
-
-export type AnalyzeResponse = RoomAnalysis;
-
 export type AnalyzeErrorCode =
   | "INVALID_INPUT"
   | "UPSTREAM_ERROR"
@@ -51,22 +38,6 @@ export interface PriceRange {
   max?: number;
 }
 
-export interface ProductsRequest {
-  analysis: RoomAnalysis;
-  budget?: number;
-}
-
-export interface ProductsResponse {
-  products: Product[];
-}
-
-export type ProductsErrorCode = AnalyzeErrorCode;
-
-export interface ProductsError {
-  error: string;
-  code: ProductsErrorCode;
-}
-
 export interface RecommendRequest {
   images: string[];
   dimensions?: string;
@@ -77,10 +48,3 @@ export interface SharedResult {
   analysis: RoomAnalysis;
   products: Product[];
 }
-
-export type RecommendEvent =
-  | { type: "analysis"; data: RoomAnalysis }
-  | { type: "product"; data: Product }
-  | { type: "shared"; data: { id: string } }
-  | { type: "error"; data: { code: AnalyzeErrorCode; message: string } }
-  | { type: "done"; data: Record<string, never> };

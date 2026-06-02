@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { budgetToPriceRange, isValidBudget } from "@/lib/budget";
+import { isValidBudget } from "@/lib/budget";
 import { getImagePlanningModel, getVisionModel } from "@/lib/gemini";
 import { buildImagePlanPrompt, buildUserPrompt } from "@/lib/prompts";
 import { SerpApiError, searchShopping } from "@/lib/serpapi";
 import { setShared } from "@/lib/share-store";
-import { formatSse } from "@/lib/stream";
 import type {
   AnalyzeError,
   AnalyzeErrorCode,
@@ -101,14 +100,16 @@ export async function POST(req: Request) {
   const dimensions =
     typeof body.dimensions === "string" ? body.dimensions : undefined;
   const budget = isValidBudget(body.budget) ? body.budget : undefined;
-  const priceRange = budget ? budgetToPriceRange(budget) : undefined;
+  const priceRange = budget !== undefined ? { max: budget } : undefined;
 
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (type: string, data: unknown) => {
-        controller.enqueue(encoder.encode(formatSse(type, data)));
+        controller.enqueue(
+          encoder.encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`)
+        );
       };
       const mapGeminiError = (
         err: unknown
@@ -122,7 +123,7 @@ export async function POST(req: Request) {
         return { code: "UPSTREAM_ERROR", message: msg };
       };
 
-      // Avvia il planner in parallelo alla vision (entrambe Gemini).
+      // Planner parallelo a vision: non dipende dal suo output.
       const planPromise = (async (): Promise<
         { ok: true; items: FurnitureQuery[] } | { ok: false; error: unknown }
       > => {
@@ -145,7 +146,6 @@ export async function POST(req: Request) {
         }
       })();
 
-      // 1) Vision: appena pronta, emetti l'analisi (o NOT_A_ROOM / errore).
       let analysis: RoomAnalysis;
       try {
         const model = getVisionModel();
@@ -191,7 +191,6 @@ export async function POST(req: Request) {
 
       send("analysis", analysis);
 
-      // 2) Piano d'arredo (già in volo): attendi e valida.
       const plan = await planPromise;
       if (!plan.ok) {
         send("error", mapGeminiError(plan.error));
@@ -215,7 +214,6 @@ export async function POST(req: Request) {
         return;
       }
 
-      // 3) SerpAPI in parallelo: emetti ogni prodotto appena disponibile.
       const queries = plan.items.slice(0, MAX_ITEMS);
       const products: Product[] = [];
       await Promise.all(
@@ -231,16 +229,14 @@ export async function POST(req: Request) {
               send("product", product);
             }
           } catch (err) {
-            // Un fallimento di una singola query non interrompe le altre.
+            // Un singolo fallimento non interrompe le altre query parallele.
             if (err instanceof SerpApiError && err.status === 500) {
-              // chiave mancante: lo segnaliamo come errore non fatale
               send("error", { code: "INTERNAL", message: err.message });
             }
           }
         })
       );
 
-      // 4) Salva il risultato condivisibile.
       const id = setShared({ analysis, products });
       send("shared", { id });
       send("done", {});
