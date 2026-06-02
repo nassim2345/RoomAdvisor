@@ -24,7 +24,8 @@ export type AnalyzeErrorCode =
   | "INVALID_INPUT"
   | "UPSTREAM_ERROR"
   | "RATE_LIMITED"
-  | "INTERNAL";
+  | "INTERNAL"
+  | "NOT_A_ROOM";
 
 export interface AnalyzeError {
   error: string;

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import ImageUploader from "@/components/ImageUploader";
 import ProductsPanel from "@/components/ProductsPanel";
+import ResetButton from "@/components/ResetButton";
 import ResultsPanel from "@/components/ResultsPanel";
 import { AnalysisSkeleton, ProductsSkeleton } from "@/components/Skeleton";
 import type {
@@ -35,6 +36,18 @@ function ErrorBanner({ title, error }: { title: string; error: AppError }) {
   );
 }
 
+function NotARoomBanner({ message }: { message: string }) {
+  return (
+    <div
+      role="status"
+      className="w-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+    >
+      <strong className="font-semibold">Foto non riconosciuta</strong>
+      <p className="mt-1 leading-relaxed">{message}</p>
+    </div>
+  );
+}
+
 export default function Home() {
   const [analysis, setAnalysis] = useState<RoomAnalysis | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
@@ -45,6 +58,7 @@ export default function Home() {
   const [productsError, setProductsError] = useState<AppError>(null);
 
   const [budget, setBudget] = useState<Budget | null>(null);
+  const [resetKey, setResetKey] = useState(0);
 
   async function fetchProducts(roomAnalysis: RoomAnalysis) {
     setProductsLoading(true);
@@ -78,15 +92,28 @@ export default function Home() {
     }
   }
 
+  function handleReset() {
+    setAnalysis(null);
+    setAnalysisError(null);
+    setProducts(null);
+    setProductsError(null);
+    setBudget(null);
+    setResetKey((k) => k + 1);
+  }
+
   const hasResults =
     analysis !== null ||
     analysisLoading ||
     productsLoading ||
     products !== null ||
-    productsError !== null;
+    productsError !== null ||
+    analysisError !== null;
+
+  const showReset = hasResults && !analysisLoading && !productsLoading;
 
   const uploader = (
     <ImageUploader
+      key={resetKey}
       onResult={(a) => {
         setAnalysis(a);
         setAnalysisError(null);
@@ -101,24 +128,35 @@ export default function Home() {
     />
   );
 
+  const analysisErrorRegion =
+    analysisError?.code === "NOT_A_ROOM" ? (
+      <NotARoomBanner message={analysisError.message} />
+    ) : (
+      <ErrorBanner title="Errore analisi" error={analysisError} />
+    );
+
   return (
     <main className="min-h-screen bg-brand-bg">
       <nav className="sticky top-0 z-50 h-14 border-b border-brand-border bg-brand-surface">
-        <div className="mx-auto flex h-full w-full max-w-7xl items-center px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex h-full w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <span className="text-lg font-semibold tracking-tight text-brand-text">
             RoomAdvisor
           </span>
+          {showReset && <ResetButton onReset={handleReset} />}
         </div>
       </nav>
 
       <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
         {!hasResults ? (
-          <div className="flex justify-center">{uploader}</div>
+          <div className="flex flex-col items-center gap-4">
+            {uploader}
+            {analysisErrorRegion}
+          </div>
         ) : (
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] lg:items-start">
+          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[420px_1fr] lg:items-start">
             <aside className="flex flex-col gap-6 lg:sticky lg:top-[72px] lg:max-h-[calc(100vh-88px)] lg:overflow-y-auto lg:pr-2">
               {uploader}
-              <ErrorBanner title="Errore analisi" error={analysisError} />
+              {analysisErrorRegion}
               {analysisLoading ? (
                 <AnalysisSkeleton />
               ) : (

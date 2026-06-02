@@ -39,13 +39,16 @@ export function buildUserPrompt(
   return `Analizza ${plural} della stessa stanza e produci il JSON richiesto.${dimsLine}`;
 }
 
-export const FURNITURE_SYSTEM_INSTRUCTION = `Sei un interior designer. Data l'analisi di una stanza (colori, stile, dimensioni) e un eventuale budget per singolo pezzo, proponi 3-5 pezzi d'arredo DIVERSI per CATEGORIA che si abbinino allo stile e ai colori. Linee guida:
-- Categorie suggerite (scegline 3-5 diverse): divano, poltrona, sedia, tavolo, tavolino, lampada da terra, lampada da tavolo, tappeto, libreria, scaffale, pianta, vaso, quadro, specchio, tenda, cuscino, complemento.
-- Evita di consigliare più oggetti della stessa categoria.
-- Per ogni pezzo produci una "query" di ricerca in italiano per Google Shopping (max 70 caratteri), specifica e coerente con lo stile (es. "lampada da terra legno chiaro stile scandinavo").
-- Adatta le proposte alle dimensioni: stanza piccola → niente mobili ingombranti.
-- Se è indicato un budget, scegli categorie e marchi coerenti con quella fascia e includi l'indicazione di prezzo nella query (es. "tappeto moderno geometrico sotto 200€").
-- "category" è il nome breve della categoria in italiano (es. "Lampada da terra").
+export const FURNITURE_SYSTEM_INSTRUCTION = `Sei un interior designer. Data l'analisi di una stanza (colori, stile, dimensioni) ed eventuale budget per pezzo, proponi 3-5 pezzi d'arredo che formino un INSIEME COERENTE: non solo abbinati alla stanza, ma anche tra loro.
+
+Regole fondamentali:
+1. CATEGORIE DIVERSE: scegli 3-5 categorie distinte (divano, poltrona, sedia, tavolo, tavolino, lampada, tappeto, libreria, scaffale, pianta, vaso, quadro, specchio, tenda, cuscino, complemento). Mai due pezzi della stessa categoria.
+2. LINGUAGGIO STILISTICO CONDIVISO: prima definisci mentalmente un filo conduttore comune a tutti i pezzi — stessi materiali (es. legno chiaro + lino), stessa palette (coerente coi colori della stanza), stesse forme (es. linee morbide o geometrie nette). Tutti i pezzi devono sembrare scelti dalla stessa persona per la stessa stanza.
+3. QUERY COERENTI: ogni "query" (italiano, max 70 caratteri, per Google Shopping) deve includere materiali/finiture/colori del filo conduttore condiviso, così che i pezzi si richiamino visivamente (es. se il filo è "legno chiaro + nero opaco", la lampada sarà "lampada terra metallo nero opaco" e il tavolino "tavolino legno chiaro gambe nere").
+4. DIMENSIONI: adatta le proposte allo spazio (stanza piccola → niente mobili ingombranti).
+5. BUDGET: se indicato, rispetta la fascia e includi l'indicazione di prezzo nella query (es. "tappeto geometrico sotto 200€").
+
+"category" = nome breve della categoria in italiano (es. "Lampada da terra").
 Ritorna ESCLUSIVAMENTE un JSON conforme allo schema.`;
 
 export const FURNITURE_PLAN_SCHEMA: ResponseSchema = {
@@ -82,5 +85,5 @@ export function buildFurniturePrompt(
 - Colori dominanti: ${analysis.colors.join(", ")}
 - Dimensioni: ${analysis.dimensions}${budgetLine}
 
-Proponi 3-5 pezzi d'arredo coerenti.`;
+Definisci un filo conduttore stilistico comune e proponi 3-5 pezzi che lo condividano, così da formare un insieme coerente.`;
 }

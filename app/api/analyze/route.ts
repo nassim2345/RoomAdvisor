@@ -140,5 +140,13 @@ export async function POST(req: Request) {
     );
   }
 
+  if (parsed.confidence === "low" && /non determinabile/i.test(parsed.style)) {
+    return errorResponse(
+      "NOT_A_ROOM",
+      "Le immagini non sembrano mostrare una stanza. Riprova con foto degli interni.",
+      422
+    );
+  }
+
   return NextResponse.json(parsed);
 }
