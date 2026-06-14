@@ -23,6 +23,8 @@ const MAX_IMAGES = 3;
 const MAX_TOTAL_BYTES = 15 * 1024 * 1024;
 const MAX_ITEMS = 5;
 const MAX_OWNED_ITEMS_CHARS = 300;
+const STAGE1_TIMEOUT_MS = 30_000;
+const STAGE3_TIMEOUT_MS = 20_000;
 
 type ImagePart = { inlineData: { mimeType: string; data: string } };
 
@@ -147,6 +149,10 @@ export async function POST(req: Request) {
           encoder.encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`)
         );
       };
+      const isAbortError = (err: unknown): boolean => {
+        const e = err as { name?: string };
+        return e?.name === "AbortError";
+      };
       const mapGeminiError = (
         err: unknown
       ): { code: AnalyzeErrorCode; message: string } => {
@@ -159,23 +165,33 @@ export async function POST(req: Request) {
         return { code: "UPSTREAM_ERROR", message: msg };
       };
 
+      // Stadio 1 — controller condiviso fra vision e planner (timeout 30s).
+      const stage1Abort = new AbortController();
+      const stage1Timer = setTimeout(
+        () => stage1Abort.abort(),
+        STAGE1_TIMEOUT_MS
+      );
+
       // Planner parallelo a vision: non dipende dal suo output.
       const planPromise = (async (): Promise<
         { ok: true; items: FurnitureQuery[] } | { ok: false; error: unknown }
       > => {
         try {
           const model = getImagePlanningModel();
-          const result = await model.generateContent({
-            contents: [
-              {
-                role: "user",
-                parts: [
-                  { text: buildImagePlanPrompt(budget, goal, ownedItems) },
-                  ...imageParts,
-                ],
-              },
-            ],
-          });
+          const result = await model.generateContent(
+            {
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    { text: buildImagePlanPrompt(budget, goal, ownedItems) },
+                    ...imageParts,
+                  ],
+                },
+              ],
+            },
+            { signal: stage1Abort.signal }
+          );
           const parsed = JSON.parse(result.response.text()) as {
             items: FurnitureQuery[];
           };
@@ -188,20 +204,32 @@ export async function POST(req: Request) {
       let analysis: RoomAnalysis;
       try {
         const model = getVisionModel();
-        const result = await model.generateContent({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                { text: buildUserPrompt(body.images.length, dimensions) },
-                ...imageParts,
-              ],
-            },
-          ],
-        });
+        const result = await model.generateContent(
+          {
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  { text: buildUserPrompt(body.images.length, dimensions) },
+                  ...imageParts,
+                ],
+              },
+            ],
+          },
+          { signal: stage1Abort.signal }
+        );
         analysis = JSON.parse(result.response.text()) as RoomAnalysis;
       } catch (err) {
-        send("error", mapGeminiError(err));
+        clearTimeout(stage1Timer);
+        stage1Abort.abort();
+        if (isAbortError(err) || stage1Abort.signal.aborted) {
+          send("error", {
+            code: "UPSTREAM_ERROR",
+            message: "Analisi scaduta, riprova",
+          });
+        } else {
+          send("error", mapGeminiError(err));
+        }
         send("done", {});
         controller.close();
         return;
@@ -231,8 +259,16 @@ export async function POST(req: Request) {
       send("analysis", analysis);
 
       const plan = await planPromise;
+      clearTimeout(stage1Timer);
       if (!plan.ok) {
-        send("error", mapGeminiError(plan.error));
+        if (isAbortError(plan.error) || stage1Abort.signal.aborted) {
+          send("error", {
+            code: "UPSTREAM_ERROR",
+            message: "Analisi scaduta, riprova",
+          });
+        } else {
+          send("error", mapGeminiError(plan.error));
+        }
         send("done", {});
         controller.close();
         return;
@@ -253,15 +289,24 @@ export async function POST(req: Request) {
         return;
       }
 
+      // Stadio 3 — controller separato per le ricerche SerpAPI (timeout 20s).
+      const stage3Abort = new AbortController();
+      const stage3Timer = setTimeout(
+        () => stage3Abort.abort(),
+        STAGE3_TIMEOUT_MS
+      );
+
       const queries = plan.items.slice(0, MAX_ITEMS);
       const products: Product[] = [];
+      let stage3Aborts = 0;
       await Promise.all(
         queries.map(async (item) => {
           try {
             const product = await searchShopping(
               item.query,
               item.category,
-              priceRange
+              priceRange,
+              stage3Abort.signal
             );
             if (product) {
               products.push(product);
@@ -269,12 +314,25 @@ export async function POST(req: Request) {
             }
           } catch (err) {
             // Un singolo fallimento non interrompe le altre query parallele.
-            if (err instanceof SerpApiError && err.status === 500) {
+            if (isAbortError(err) || stage3Abort.signal.aborted) {
+              stage3Aborts++;
+            } else if (err instanceof SerpApiError && err.status === 500) {
               send("error", { code: "INTERNAL", message: err.message });
             }
           }
         })
       );
+      clearTimeout(stage3Timer);
+
+      if (products.length === 0 && stage3Aborts > 0) {
+        send("error", {
+          code: "UPSTREAM_ERROR",
+          message: "Ricerca prodotti scaduta, riprova",
+        });
+        send("done", {});
+        controller.close();
+        return;
+      }
 
       const id = setShared({ analysis, products });
       send("shared", { id });

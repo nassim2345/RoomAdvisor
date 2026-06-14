@@ -34,7 +34,8 @@ function buildTbs(range: PriceRange): string | null {
 export async function searchShopping(
   query: string,
   category: string,
-  priceRange?: PriceRange
+  priceRange?: PriceRange,
+  signal?: AbortSignal
 ): Promise<Product | null> {
   const apiKey = process.env.SERPAPI_KEY;
   if (!apiKey) {
@@ -52,7 +53,7 @@ export async function searchShopping(
     if (tbs) url.searchParams.set("tbs", tbs);
   }
 
-  const res = await fetch(url.toString());
+  const res = await fetch(url.toString(), { signal });
   if (!res.ok) {
     throw new SerpApiError(
       `SerpAPI HTTP ${res.status}`,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getShared } from "@/lib/share-store";
 
 export const runtime = "nodejs";
+export const maxDuration = 10;
 
 export async function GET(
   _req: Request,
