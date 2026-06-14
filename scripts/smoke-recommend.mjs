@@ -41,7 +41,10 @@ async function streamRecommend(file, label, extra = {}) {
       const parsed = data ? JSON.parse(data) : null;
       events.push({ event, parsed, at: Date.now() - start });
       if (event === "analysis")
-        console.log(`  +${Date.now() - start}ms analysis: ${parsed.style}`);
+        console.log(
+          `  +${Date.now() - start}ms analysis: ${parsed.style} ` +
+            `(observations: ${parsed.observations?.length ?? 0}, issues: ${parsed.issues?.length ?? 0})`
+        );
       else if (event === "product")
         console.log(`  +${Date.now() - start}ms product: ${parsed.category} — ${parsed.name} (${parsed.price})`);
       else if (event === "shared")
@@ -63,18 +66,52 @@ if (existsSync("not-a-room.jpg")) {
   console.log(`  => analysis assente: ${!hasAnalysis}, NOT_A_ROOM: ${hasNotRoom}`);
 }
 
-// 2) Happy path + share roundtrip
+// 2) Validation errors (goal invalido, ownedItems troppo lungo)
+async function validation(label, body) {
+  const res = await fetch(RECOMMEND, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const j = await res.json();
+  console.log(`[${label}] HTTP ${res.status} ${j.code ?? "?"} — ${j.error ?? ""}`);
+}
+
 if (existsSync("test-room.jpg")) {
-  const ev = await streamRecommend("test-room.jpg", "STANZA REALE", { budget: 300 });
+  const img = readFileSync("test-room.jpg").toString("base64");
+  const dataUrl = `data:image/jpeg;base64,${img}`;
+  console.log("\n=== VALIDATION ===");
+  await validation("goal invalido", { images: [dataUrl], goal: "absurd" });
+  await validation("ownedItems > 300 char", {
+    images: [dataUrl],
+    ownedItems: "x".repeat(301),
+  });
+}
+
+// 3) Happy path con tutti i nuovi campi + share roundtrip
+if (existsSync("test-room.jpg")) {
+  const ev = await streamRecommend("test-room.jpg", "STANZA + GOAL + OWNED", {
+    budget: 300,
+    goal: "minimal",
+    ownedItems: "divano grigio in pelle, libreria IKEA Billy",
+  });
+  const analysis = ev?.find((e) => e.event === "analysis");
+  if (analysis) {
+    console.log(`  observations sample: ${JSON.stringify(analysis.parsed.observations?.slice(0, 2))}`);
+    console.log(`  issues titles: ${JSON.stringify(analysis.parsed.issues?.map((i) => i.title))}`);
+  }
+  const productCategories = ev?.filter((e) => e.event === "product").map((e) => e.parsed.category) ?? [];
+  console.log(`  product categories: ${JSON.stringify(productCategories)}`);
+  console.log(`  (verifica manuale: nessun divano né libreria atteso)`);
   const shared = ev?.find((e) => e.event === "shared");
   if (shared) {
     const res = await fetch(SHARE(shared.parsed.id));
     const body = await res.json();
     console.log(`\n[SHARE ${shared.parsed.id}] HTTP ${res.status}`);
-    console.log(`  analysis.style: ${body.analysis?.style}`);
+    console.log(`  analysis.observations: ${body.analysis?.observations?.length} items`);
+    console.log(`  analysis.issues: ${body.analysis?.issues?.length} items`);
     console.log(`  products: ${body.products?.length}`);
   }
-  // share inesistente
   const res404 = await fetch(SHARE("inesistente-123"));
   console.log(`[SHARE inesistente] HTTP ${res404.status} (atteso 404)`);
 }

@@ -4,13 +4,14 @@ import { getImagePlanningModel, getVisionModel } from "@/lib/gemini";
 import { buildImagePlanPrompt, buildUserPrompt } from "@/lib/prompts";
 import { SerpApiError, searchShopping } from "@/lib/serpapi";
 import { setShared } from "@/lib/share-store";
-import type {
-  AnalyzeError,
-  AnalyzeErrorCode,
-  FurnitureQuery,
-  Product,
-  RecommendRequest,
-  RoomAnalysis,
+import {
+  isGoal,
+  type AnalyzeError,
+  type AnalyzeErrorCode,
+  type FurnitureQuery,
+  type Product,
+  type RecommendRequest,
+  type RoomAnalysis,
 } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -21,6 +22,7 @@ const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
 const MAX_IMAGES = 3;
 const MAX_TOTAL_BYTES = 15 * 1024 * 1024;
 const MAX_ITEMS = 5;
+const MAX_OWNED_ITEMS_CHARS = 300;
 
 type ImagePart = { inlineData: { mimeType: string; data: string } };
 
@@ -37,7 +39,15 @@ function isRoomAnalysis(x: RoomAnalysis): boolean {
     x.colors.every((c) => typeof c === "string" && HEX_RE.test(c)) &&
     typeof x.style === "string" &&
     typeof x.dimensions === "string" &&
-    ["low", "medium", "high"].includes(x.confidence)
+    ["low", "medium", "high"].includes(x.confidence) &&
+    Array.isArray(x.observations) &&
+    x.observations.length <= 5 &&
+    x.observations.every((o) => typeof o === "string") &&
+    Array.isArray(x.issues) &&
+    x.issues.length <= 5 &&
+    x.issues.every(
+      (i) => typeof i?.title === "string" && typeof i?.description === "string"
+    )
   );
 }
 
@@ -68,6 +78,27 @@ export async function POST(req: Request) {
       'Campo "budget" deve essere un numero positivo (euro massimi per pezzo)',
       400
     );
+  }
+
+  if (body.goal !== undefined && !isGoal(body.goal)) {
+    return jsonError(
+      "INVALID_INPUT",
+      'Campo "goal" non valido (atteso: cozy, minimal, japandi, industrial, scandinavian, modern, luxury)',
+      400
+    );
+  }
+
+  if (body.ownedItems !== undefined) {
+    if (typeof body.ownedItems !== "string") {
+      return jsonError("INVALID_INPUT", 'Campo "ownedItems" deve essere una stringa', 400);
+    }
+    if (body.ownedItems.trim().length > MAX_OWNED_ITEMS_CHARS) {
+      return jsonError(
+        "INVALID_INPUT",
+        `Campo "ownedItems" supera ${MAX_OWNED_ITEMS_CHARS} caratteri`,
+        400
+      );
+    }
   }
 
   const imageParts: ImagePart[] = [];
@@ -101,6 +132,11 @@ export async function POST(req: Request) {
     typeof body.dimensions === "string" ? body.dimensions : undefined;
   const budget = isValidBudget(body.budget) ? body.budget : undefined;
   const priceRange = budget !== undefined ? { max: budget } : undefined;
+  const goal = isGoal(body.goal) ? body.goal : undefined;
+  const ownedItems =
+    typeof body.ownedItems === "string" && body.ownedItems.trim().length > 0
+      ? body.ownedItems.trim()
+      : undefined;
 
   const encoder = new TextEncoder();
 
@@ -133,7 +169,10 @@ export async function POST(req: Request) {
             contents: [
               {
                 role: "user",
-                parts: [{ text: buildImagePlanPrompt(budget) }, ...imageParts],
+                parts: [
+                  { text: buildImagePlanPrompt(budget, goal, ownedItems) },
+                  ...imageParts,
+                ],
               },
             ],
           });

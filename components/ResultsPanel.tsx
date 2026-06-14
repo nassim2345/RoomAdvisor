@@ -34,6 +34,19 @@ export default function ResultsPanel({ analysis }: ResultsPanelProps) {
         </span>
       </header>
 
+      {analysis.observations && analysis.observations.length > 0 && (
+        <div className="mb-6">
+          <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-brand-text-muted">
+            Osservazioni
+          </h3>
+          <ul className="list-disc space-y-1.5 pl-5 leading-relaxed text-brand-text">
+            {analysis.observations.map((obs, i) => (
+              <li key={i}>{obs}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="mb-6">
         <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-brand-text-muted">
           Colori dominanti

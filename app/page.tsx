@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import ImageUploader from "@/components/ImageUploader";
+import IssuesPanel from "@/components/IssuesPanel";
 import ProductsPanel from "@/components/ProductsPanel";
 import ResetButton from "@/components/ResetButton";
 import ResultsPanel from "@/components/ResultsPanel";
@@ -182,6 +183,7 @@ export default function Home() {
                 title="Errore ricerca prodotti"
                 error={productsError}
               />
+              <IssuesPanel issues={analysis?.issues} />
               {productsRegion}
             </section>
           )}

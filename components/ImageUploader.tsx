@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Product, RoomAnalysis } from "@/lib/types";
+import {
+  GOAL_LABELS,
+  GOAL_OPTIONS,
+  isGoal,
+  type Goal,
+  type Product,
+  type RoomAnalysis,
+} from "@/lib/types";
 
 type StreamError = { message: string; code?: string };
 
@@ -66,6 +73,8 @@ export default function ImageUploader({
   const [warning, setWarning] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dimensions, setDimensions] = useState("");
+  const [goal, setGoal] = useState<Goal | null>(null);
+  const [ownedItems, setOwnedItems] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -180,6 +189,7 @@ export default function ImageUploader({
     try {
       const dataUrls = await Promise.all(files.map(fileToDataUrl));
       const trimmedDimensions = dimensions.trim();
+      const trimmedOwned = ownedItems.trim();
       const res = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -188,6 +198,8 @@ export default function ImageUploader({
           images: dataUrls,
           ...(trimmedDimensions ? { dimensions: trimmedDimensions } : {}),
           ...(budget ? { budget } : {}),
+          ...(goal ? { goal } : {}),
+          ...(trimmedOwned ? { ownedItems: trimmedOwned } : {}),
         }),
       });
 
@@ -248,6 +260,8 @@ export default function ImageUploader({
     files,
     dimensions,
     budget,
+    goal,
+    ownedItems,
     onStart,
     onAnalysis,
     onAnalysisError,
@@ -265,6 +279,14 @@ export default function ImageUploader({
       onBudgetChange(Number.isFinite(n) && n > 0 ? n : null);
     },
     [onBudgetChange]
+  );
+
+  const handleGoalChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const v = e.target.value;
+      setGoal(v === "" ? null : isGoal(v) ? v : null);
+    },
+    []
   );
 
   const canAddMore = files.length < MAX_IMAGES;
@@ -389,6 +411,30 @@ export default function ImageUploader({
 
           <div>
             <label
+              htmlFor="room-goal"
+              className="mb-1.5 block text-sm font-medium text-brand-text"
+            >
+              Obiettivo stilistico{" "}
+              <span className="text-brand-text-muted">(opzionale)</span>
+            </label>
+            <select
+              id="room-goal"
+              value={goal ?? ""}
+              onChange={handleGoalChange}
+              disabled={disabled}
+              className="w-full rounded-lg border border-brand-border bg-white px-3 py-2 text-sm text-brand-text disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <option value="">Nessun obiettivo</option>
+              {GOAL_OPTIONS.map((g) => (
+                <option key={g} value={g}>
+                  {GOAL_LABELS[g]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label
               htmlFor="room-budget"
               className="mb-1.5 block text-sm font-medium text-brand-text"
             >
@@ -405,6 +451,26 @@ export default function ImageUploader({
               placeholder="es. 150"
               disabled={disabled}
               className="w-full rounded-lg border border-brand-border bg-white px-3 py-2 text-sm text-brand-text placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="room-owned"
+              className="mb-1.5 block text-sm font-medium text-brand-text"
+            >
+              Cosa possiedi già{" "}
+              <span className="text-brand-text-muted">(opzionale)</span>
+            </label>
+            <textarea
+              id="room-owned"
+              rows={2}
+              maxLength={300}
+              value={ownedItems}
+              onChange={(e) => setOwnedItems(e.target.value)}
+              placeholder="es. divano grigio in pelle, libreria IKEA Billy"
+              disabled={disabled}
+              className="w-full resize-none rounded-lg border border-brand-border bg-white px-3 py-2 text-sm text-brand-text placeholder:text-gray-400 disabled:cursor-not-allowed disabled:opacity-50"
             />
           </div>
         </div>

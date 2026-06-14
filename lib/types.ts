@@ -1,10 +1,17 @@
 export type Confidence = "low" | "medium" | "high";
 
+export interface Issue {
+  title: string;
+  description: string;
+}
+
 export interface RoomAnalysis {
   colors: string[];
   style: string;
   dimensions: string;
   confidence: Confidence;
+  observations: string[];
+  issues: Issue[];
 }
 
 export type AnalyzeErrorCode =
@@ -38,10 +45,45 @@ export interface PriceRange {
   max?: number;
 }
 
+export type Goal =
+  | "cozy"
+  | "minimal"
+  | "japandi"
+  | "industrial"
+  | "scandinavian"
+  | "modern"
+  | "luxury";
+
+export const GOAL_OPTIONS: Goal[] = [
+  "cozy",
+  "minimal",
+  "japandi",
+  "industrial",
+  "scandinavian",
+  "modern",
+  "luxury",
+];
+
+export const GOAL_LABELS: Record<Goal, string> = {
+  cozy: "Cozy",
+  minimal: "Minimal",
+  japandi: "Japandi",
+  industrial: "Industrial",
+  scandinavian: "Scandinavian",
+  modern: "Modern",
+  luxury: "Luxury",
+};
+
+export function isGoal(value: unknown): value is Goal {
+  return typeof value === "string" && GOAL_OPTIONS.includes(value as Goal);
+}
+
 export interface RecommendRequest {
   images: string[];
   dimensions?: string;
   budget?: number;
+  goal?: Goal;
+  ownedItems?: string;
 }
 
 export interface SharedResult {

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import IssuesPanel from "@/components/IssuesPanel";
 import ProductsPanel from "@/components/ProductsPanel";
 import ResultsPanel from "@/components/ResultsPanel";
 import { getShared } from "@/lib/share-store";
@@ -38,6 +39,7 @@ export default function ResultsPage({ params }: { params: { id: string } }) {
 
       <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-8 px-4 py-8 sm:px-6 sm:py-12 lg:px-8">
         <ResultsPanel analysis={result.analysis} />
+        <IssuesPanel issues={result.analysis.issues} />
         <ProductsPanel products={result.products} />
       </div>
     </main>
