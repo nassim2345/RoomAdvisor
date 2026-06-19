@@ -6,6 +6,8 @@ interface ShareButtonProps {
   id: string;
 }
 
+const COPIED_FEEDBACK_MS = 2000;
+
 export default function ShareButton({ id }: ShareButtonProps) {
   const [copied, setCopied] = useState(false);
 
@@ -14,7 +16,7 @@ export default function ShareButton({ id }: ShareButtonProps) {
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
     } catch {
       // Fallback: seleziona via prompt se clipboard non disponibile
       window.prompt("Copia il link:", url);
