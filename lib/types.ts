@@ -26,6 +26,11 @@ export interface AnalyzeError {
   code: AnalyzeErrorCode;
 }
 
+export interface StreamError {
+  message: string;
+  code?: string;
+}
+
 export interface FurnitureQuery {
   category: string;
   query: string;

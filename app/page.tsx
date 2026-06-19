@@ -8,9 +8,9 @@ import ResetButton from "@/components/ResetButton";
 import ResultsPanel from "@/components/ResultsPanel";
 import ShareButton from "@/components/ShareButton";
 import { AnalysisSkeleton, ProductsSkeleton } from "@/components/Skeleton";
-import type { Product, RoomAnalysis } from "@/lib/types";
+import type { Product, RoomAnalysis, StreamError } from "@/lib/types";
 
-type AppError = { message: string; code?: string } | null;
+type AppError = StreamError | null;
 
 function ErrorBanner({ title, error }: { title: string; error: AppError }) {
   if (!error) return null;

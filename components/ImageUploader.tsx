@@ -8,9 +8,8 @@ import {
   type Goal,
   type Product,
   type RoomAnalysis,
+  type StreamError,
 } from "@/lib/types";
-
-type StreamError = { message: string; code?: string };
 
 interface ImageUploaderProps {
   onStart: () => void;
