@@ -26,6 +26,40 @@ const MAX_OWNED_ITEMS_CHARS = 300;
 const STAGE1_TIMEOUT_MS = 30_000;
 const STAGE3_TIMEOUT_MS = 20_000;
 
+// Rate limiter in-memory, non distribuito. Su Vercel con istanze multiple il
+// limite effettivo può essere N×10. Stopgap per traffico basso, non protezione
+// da abuso reale.
+const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+function getClientIp(req: Request): string {
+  const fwd = req.headers.get("x-forwarded-for") ?? "";
+  const first = fwd.split(",")[0]?.trim();
+  return first || "unknown";
+}
+
+function checkRateLimit(ip: string): { allowed: boolean; retryAfter: number } {
+  const now = Date.now();
+  // Cleanup lazy: rimuovi entry scadute. Niente setInterval (anti-pattern serverless).
+  rateLimitStore.forEach((entry, key) => {
+    if (entry.resetAt < now) rateLimitStore.delete(key);
+  });
+  const existing = rateLimitStore.get(ip);
+  if (!existing || existing.resetAt < now) {
+    rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return { allowed: true, retryAfter: 0 };
+  }
+  if (existing.count >= RATE_LIMIT_MAX) {
+    return {
+      allowed: false,
+      retryAfter: Math.max(1, Math.ceil((existing.resetAt - now) / 1000)),
+    };
+  }
+  existing.count++;
+  return { allowed: true, retryAfter: 0 };
+}
+
 type ImagePart = { inlineData: { mimeType: string; data: string } };
 
 function jsonError(code: AnalyzeErrorCode, message: string, status: number) {
@@ -54,6 +88,16 @@ function isRoomAnalysis(x: RoomAnalysis): boolean {
 }
 
 export async function POST(req: Request) {
+  // 1° controllo: rate limit (HTTP 429 puro, non SSE). Costa quasi nulla.
+  const ip = getClientIp(req);
+  const rl = checkRateLimit(ip);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests", code: "RATE_LIMITED" },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
+    );
+  }
+
   let body: RecommendRequest;
   try {
     body = (await req.json()) as RecommendRequest;
