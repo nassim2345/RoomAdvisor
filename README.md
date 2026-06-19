@@ -63,9 +63,27 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Endpoints
 
-**`POST /api/recommend`** — the only endpoint the client uses. Accepts `{ images, dimensions?, budget? }`, returns `text/event-stream`. Emits `analysis`, then `product` events one by one, then `shared` and `done`. Emits `error` with code `NOT_A_ROOM` if the images don't show a room.
+**`POST /api/recommend`** — the only endpoint the client uses. Accepts `{ images, dimensions?, budget?, goal?, ownedItems? }`, returns `text/event-stream`. Emits `analysis`, then `product` events one by one, then `shared` and `done`. Emits `error` with code `NOT_A_ROOM` if the images don't show a room. Returns `HTTP 429 { code: "RATE_LIMITED" }` (plain JSON, not SSE) when the per-IP rate limit is hit.
 
 **`GET /api/share/[id]`** — returns a saved result by ID. 404 if expired or not found.
+
+---
+
+## Deploy
+
+Works on Vercel Hobby or Pro. The streaming endpoint sets `maxDuration = 60s` via segment config (`app/api/recommend/route.ts`); Hobby allows up to 300s, so no Pro plan is required for this MVP.
+
+Three steps:
+
+1. Import the GitHub repo into Vercel.
+2. Set environment variables in the project settings:
+   - `GEMINI_API_KEY`
+   - `SERPAPI_KEY`
+3. Deploy.
+
+Security headers (`X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, `Strict-Transport-Security`) and `productionBrowserSourceMaps: false` are configured in `next.config.mjs` and apply automatically.
+
+**Honest note on rate limiting:** the in-memory limiter (10 req/IP/60s on `/api/recommend`) is a stopgap. On Vercel with multiple concurrent function instances the effective limit is roughly N×10 — it deters trivial abuse but does not protect against a determined attacker. For real protection put a distributed limiter (Upstash, Vercel KV) or a WAF in front.
 
 ---
 
@@ -98,8 +116,9 @@ scripts/smoke-recommend.mjs
 
 - Shared results are stored in memory. They disappear on server restart. In production, swap `lib/share-store.ts` for Redis or Vercel KV.
 - Photos are never saved — only the analysis and product list go into the share store.
-- No server-side rate limiting. Gemini and SerpAPI both have free-tier quotas that are enough for personal use, not for production traffic.
+- Rate limiting is in-memory and per-instance, not distributed (see Deploy note above).
 - The Google Shopping price filter (`tbs ppr_max`) is best-effort. Some results will be over budget.
+- The project is pinned to Next.js 14.2.x. `npm audit` reports 4 high-severity advisories on Next 14 (image optimizer DoS, request smuggling, SSRF on websocket upgrades, cache poisoning); all fixes require a major bump to Next 16, which is a separate review.
 
 ---
 
