@@ -91,6 +91,51 @@ Security headers (`X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-P
 
 ---
 
+## Desktop app
+
+RoomAdvisor also ships as an installable desktop app for **Windows, macOS and Linux**. It's the same app, running locally in its own window: no browser and no server to set up.
+
+### Install
+
+1. Open the [Releases](https://github.com/nassim2345/RoomAdvisor/releases) page and download the file for your system:
+   - **Windows** → `RoomAdvisor-Setup-x.y.z.exe`
+   - **macOS** → `RoomAdvisor-x.y.z-arm64.dmg` (Apple Silicon) or `RoomAdvisor-x.y.z-x64.dmg` (Intel)
+   - **Linux** → `RoomAdvisor-x.y.z.AppImage` (any distro) or `roomadvisor_x.y.z_amd64.deb` (Debian/Ubuntu)
+2. Install it like any other app.
+3. On first launch, paste your two API keys (Gemini + SerpAPI, both have free tiers). You can change them later from the **Chiavi API…** menu (`Ctrl/Cmd + ,`).
+
+The installers are **not code-signed**, so the first launch shows a warning:
+
+- **Windows** (SmartScreen): *More info* → *Run anyway*.
+- **macOS**: right-click the app → *Open* → *Open*. If it says the app is "damaged", run `xattr -cr /Applications/RoomAdvisor.app` once in Terminal.
+- **Linux AppImage**: `chmod +x RoomAdvisor-*.AppImage`, then run it.
+
+Keys are stored only on your computer, in the app's data folder, encrypted with the OS keychain where one is available (always on Windows and macOS; on Linux only if a keyring such as GNOME Keyring is running). Share links are disabled in the desktop app, since the local server isn't reachable by anyone else.
+
+### Publish a new version
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+The **Desktop release** workflow builds the three installers and attaches them to a GitHub Release named after the tag (the app version is taken from the tag). To build without publishing, run the workflow manually from the Actions tab: the installers appear as downloadable artifacts of the run.
+
+### Run or build locally
+
+| Command | What it does |
+|---|---|
+| `npm run desktop` | Build and open the desktop app |
+| `npm run desktop:dist` | Build the installer for the current OS into `dist-desktop/` |
+
+How it works: `next build` produces a self-contained server (`output: "standalone"`). Electron starts it on a random `127.0.0.1` port using its bundled Node runtime, passes your keys as environment variables, and opens it in a window. Product links open in your normal browser. The code is in `electron/`.
+
+### Install from the browser (PWA)
+
+The deployed web version is also installable: in Chrome/Edge use the install icon in the address bar, on iPhone use *Share → Add to Home Screen*.
+
+---
+
 ## Project structure
 
 ```
@@ -117,7 +162,10 @@ lib/
   recommend-client.ts     # browser client for the SSE endpoint
   image.ts, products.ts, color.ts, budget.ts, types.ts
 tests/                    # Vitest
-scripts/smoke-recommend.mjs
+electron/                 # desktop app: main process, preload, setup screen
+scripts/
+  smoke-recommend.mjs
+  prepare-desktop.mjs     # copies static assets into the standalone server
 ```
 
 ---

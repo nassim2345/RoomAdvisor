@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Server autonomo in .next/standalone: lo usa l'app desktop (Electron).
+  // Su Vercel non cambia nulla.
+  output: "standalone",
   productionBrowserSourceMaps: false,
   async headers() {
     return [

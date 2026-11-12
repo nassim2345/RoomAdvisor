@@ -52,23 +52,42 @@ function jsonError(code: AnalyzeErrorCode, message: string, status: number) {
   return NextResponse.json(body, { status });
 }
 
+const KEY_HINT =
+  process.env.ROOMADVISOR_DESKTOP === "1"
+    ? "Correggila dal menu «Chiavi API…»."
+    : "Controlla GEMINI_API_KEY nella configurazione.";
+
 function mapGeminiError(err: unknown, timedOut: boolean): StreamErrorPayload {
   if (timedOut || isAbortError(err)) {
     return { code: "UPSTREAM_ERROR", message: "Analisi scaduta, riprova" };
   }
   const e = err as { status?: number; message?: string };
+  const msg = e?.message ?? "";
   if (e?.status === 429) {
     return {
       code: "RATE_LIMITED",
-      message: "Il servizio di analisi è sovraccarico, riprova tra qualche secondo",
+      message: "Il servizio di analisi è sovraccarico o hai esaurito la quota, riprova tra qualche secondo",
     };
   }
-  const msg = e?.message ?? "Errore chiamata Gemini";
-  if (msg.includes("GEMINI_API_KEY")) return { code: "INTERNAL", message: msg };
-  if (err instanceof SyntaxError) {
-    return { code: "UPSTREAM_ERROR", message: "Risposta Gemini non valida" };
+  if (msg.includes("GEMINI_API_KEY")) {
+    return { code: "INTERNAL", message: `Chiave Gemini mancante. ${KEY_HINT}` };
   }
-  return { code: "UPSTREAM_ERROR", message: msg };
+  if (
+    e?.status === 401 ||
+    e?.status === 403 ||
+    /API_KEY_INVALID|API key not valid|API key expired/i.test(msg)
+  ) {
+    return { code: "INTERNAL", message: `Chiave Gemini non valida. ${KEY_HINT}` };
+  }
+  if (err instanceof SyntaxError) {
+    return { code: "UPSTREAM_ERROR", message: "Risposta Gemini non valida, riprova" };
+  }
+  // Il messaggio grezzo dell'SDK è lungo e tecnico: va nei log, non all'utente.
+  console.error("[recommend] Gemini error", err);
+  return {
+    code: "UPSTREAM_ERROR",
+    message: "Il servizio di analisi ha restituito un errore, riprova tra poco",
+  };
 }
 
 async function generateJson<T>(
@@ -176,6 +195,16 @@ async function analyzeAndPlan(
   }
 }
 
+function describeSerpConfigError(err: unknown): string {
+  const status = (err as { status?: number }).status;
+  const hint =
+    process.env.ROOMADVISOR_DESKTOP === "1"
+      ? "Correggila dal menu «Chiavi API…»."
+      : "Controlla SERPAPI_KEY nella configurazione.";
+  if (status === 500) return `Chiave SerpAPI mancante. ${hint}`;
+  return `Chiave SerpAPI non valida o quota esaurita. ${hint}`;
+}
+
 /**
  * Stadio 3: una ricerca SerpAPI per categoria, in parallelo. Ogni prodotto
  * viene emesso appena arriva; un singolo fallimento non blocca gli altri.
@@ -222,7 +251,7 @@ async function searchProducts(
           }
         } catch (err) {
           if (isAbortError(err) || stage.signal.aborted) aborts++;
-          else if (isConfigError(err)) configError = (err as Error).message;
+          else if (isConfigError(err)) configError = describeSerpConfigError(err);
           else failures++;
         }
       })
@@ -311,7 +340,9 @@ export async function POST(req: Request) {
           (p) => send("product", p),
           (w) => send("warning", w)
         );
-        if (!lifecycle.signal.aborted) {
+        // Nell'app desktop il server gira su 127.0.0.1 con una porta casuale:
+        // un link condiviso non sarebbe raggiungibile da nessun altro.
+        if (!lifecycle.signal.aborted && process.env.ROOMADVISOR_DESKTOP !== "1") {
           try {
             const id = await setShared({ analysis, products });
             send("shared", { id });

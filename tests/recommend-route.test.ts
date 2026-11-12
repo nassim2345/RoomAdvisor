@@ -150,3 +150,25 @@ describe("POST /api/recommend", () => {
     expect(last?.headers.get("retry-after")).toBeTruthy();
   });
 });
+
+describe("error messages", () => {
+  it("turns an invalid Gemini key into a readable message", async () => {
+    vision.mockRejectedValue(
+      Object.assign(new Error("[400 Bad Request] API key not valid. Please pass a valid API key."), { status: 400 })
+    );
+    planner.mockReturnValue(new Promise(() => {}));
+    const events = await readEvents(await POST(request({ images: [PNG] })));
+    expect(events[0].data).toEqual({
+      code: "INTERNAL",
+      message: "Chiave Gemini non valida. Controlla GEMINI_API_KEY nella configurazione.",
+    });
+  });
+
+  it("does not leak raw SDK messages for other upstream errors", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vision.mockRejectedValue(Object.assign(new Error("[400] internal gibberish {json}"), { status: 400 }));
+    planner.mockReturnValue(new Promise(() => {}));
+    const events = await readEvents(await POST(request({ images: [PNG] })));
+    expect((events[0].data as { message: string }).message).not.toContain("gibberish");
+  });
+});

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 
@@ -27,9 +27,15 @@ function siteUrl(): URL {
 
 export const metadata: Metadata = {
   metadataBase: siteUrl(),
+  applicationName: "RoomAdvisor",
+  appleWebApp: { capable: true, title: "RoomAdvisor", statusBarStyle: "default" },
   title: "RoomAdvisor — Consigli d'arredo dalle tue foto",
   description:
     "Carica le foto della tua stanza per ottenere un'analisi dello stile e consigli d'arredo personalizzati.",
+};
+
+export const viewport: Viewport = {
+  themeColor: "#FAF7F2",
 };
 
 export default function RootLayout({
