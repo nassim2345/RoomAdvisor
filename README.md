@@ -114,12 +114,7 @@ Keys are stored only on your computer, in the app's data folder, encrypted with 
 
 ### Publish a new version
 
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-The **Desktop release** workflow builds the three installers and attaches them to a GitHub Release named after the tag (the app version is taken from the tag). To build without publishing, run the workflow manually from the Actions tab: the installers appear as downloadable artifacts of the run.
+Bump `"version"` in `package.json` (e.g. `0.2.0`) and merge into `main`. The **Desktop release** workflow notices there's no `v0.2.0` release yet, builds the five installers on Windows, macOS and Linux runners, and publishes them as a GitHub Release. Pushing a `v*` tag works too. To build without publishing, run the workflow manually from the Actions tab: the installers appear as artifacts of the run.
 
 ### Run or build locally
 
