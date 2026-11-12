@@ -8,6 +8,7 @@ import ResetButton from "@/components/ResetButton";
 import ResultsPanel from "@/components/ResultsPanel";
 import ShareButton from "@/components/ShareButton";
 import { AnalysisSkeleton, ProductsSkeleton } from "@/components/Skeleton";
+import { insertByRank } from "@/lib/products";
 import type { Product, RoomAnalysis, StreamError } from "@/lib/types";
 
 type AppError = StreamError | null;
@@ -52,6 +53,7 @@ export default function Home() {
   const [products, setProducts] = useState<Product[] | null>(null);
   const [productsLoading, setProductsLoading] = useState(false);
   const [productsError, setProductsError] = useState<AppError>(null);
+  const [productsWarning, setProductsWarning] = useState<string | null>(null);
 
   const [budget, setBudget] = useState<number | null>(null);
   const [shareId, setShareId] = useState<string | null>(null);
@@ -62,6 +64,7 @@ export default function Home() {
     setAnalysisError(null);
     setProducts(null);
     setProductsError(null);
+    setProductsWarning(null);
     setShareId(null);
     setAnalysisLoading(true);
     setProductsLoading(true);
@@ -72,6 +75,7 @@ export default function Home() {
     setAnalysisError(null);
     setProducts(null);
     setProductsError(null);
+    setProductsWarning(null);
     setShareId(null);
     setAnalysisLoading(false);
     setProductsLoading(false);
@@ -102,7 +106,8 @@ export default function Home() {
         setAnalysisLoading(false);
         setProductsLoading(false);
       }}
-      onProduct={(p) => setProducts((prev) => [...(prev ?? []), p])}
+      onProduct={(p) => setProducts((prev) => insertByRank(prev ?? [], p))}
+      onWarning={(w) => setProductsWarning(w.message)}
       onProductsError={(e) => {
         setProductsError(e);
         setProductsLoading(false);
@@ -128,11 +133,11 @@ export default function Home() {
 
   const productsRegion =
     products && products.length > 0 ? (
-      <ProductsPanel products={products} loading={productsLoading} />
+      <ProductsPanel products={products} loading={productsLoading} budget={budget} />
     ) : productsLoading ? (
       <ProductsSkeleton />
     ) : (
-      <ProductsPanel products={products} />
+      <ProductsPanel products={products} budget={budget} />
     );
 
   return (
@@ -183,6 +188,14 @@ export default function Home() {
                 title="Errore ricerca prodotti"
                 error={productsError}
               />
+              {productsWarning && !productsLoading && (
+                <p
+                  role="status"
+                  className="w-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+                >
+                  {productsWarning}
+                </p>
+              )}
               <IssuesPanel issues={analysis?.issues} />
               {productsRegion}
             </section>

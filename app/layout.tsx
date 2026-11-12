@@ -13,7 +13,20 @@ const geistMono = localFont({
   weight: "100 900",
 });
 
+// URL assoluto per le immagini Open Graph dei link condivisi.
+function siteUrl(): URL {
+  const explicit = process.env.NEXT_PUBLIC_SITE_URL;
+  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
+  const raw = explicit || (vercel ? `https://${vercel}` : "http://localhost:3000");
+  try {
+    return new URL(raw);
+  } catch {
+    return new URL("http://localhost:3000");
+  }
+}
+
 export const metadata: Metadata = {
+  metadataBase: siteUrl(),
   title: "RoomAdvisor — Consigli d'arredo dalle tue foto",
   description:
     "Carica le foto della tua stanza per ottenere un'analisi dello stile e consigli d'arredo personalizzati.",

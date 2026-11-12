@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { compressImage, dataUrlBytes } from "@/lib/image";
+import { streamRecommend } from "@/lib/recommend-client";
 import {
   GOAL_LABELS,
   GOAL_OPTIONS,
@@ -17,6 +19,7 @@ interface ImageUploaderProps {
   onAnalysisError: (error: StreamError) => void;
   onProduct: (product: Product) => void;
   onProductsError: (error: StreamError) => void;
+  onWarning?: (error: StreamError) => void;
   onShared: (id: string) => void;
   onComplete: () => void;
   disabled?: boolean;
@@ -26,33 +29,12 @@ interface ImageUploaderProps {
 }
 
 const MAX_IMAGES = 3;
-const SOFT_MAX_BYTES = 8 * 1024 * 1024;
-
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = () => reject(reader.error ?? new Error("Errore lettura file"));
-    reader.readAsDataURL(file);
-  });
-}
-
-function parseSseChunk(
-  chunk: string
-): { event: string; data: unknown } | null {
-  let event: string | null = null;
-  let data: string | null = null;
-  for (const line of chunk.split("\n")) {
-    if (line.startsWith("event:")) event = line.slice(6).trim();
-    else if (line.startsWith("data:")) data = line.slice(5).trim();
-  }
-  if (!event || data === null) return null;
-  try {
-    return { event, data: JSON.parse(data) };
-  } catch {
-    return null;
-  }
-}
+// Le foto vengono ridimensionate nel browser prima dell'invio, quindi si
+// possono accettare anche gli originali pesanti degli smartphone.
+const SOFT_MAX_BYTES = 25 * 1024 * 1024;
+// Allineato a MAX_TOTAL_IMAGE_BYTES lato server (3 MB decodificati).
+const MAX_PAYLOAD_BYTES = 3 * 1024 * 1024;
+const ACCEPTED_TYPES = "image/jpeg,image/png,image/webp,image/heic,image/heif";
 
 export default function ImageUploader({
   onStart,
@@ -60,6 +42,7 @@ export default function ImageUploader({
   onAnalysisError,
   onProduct,
   onProductsError,
+  onWarning,
   onShared,
   onComplete,
   disabled = false,
@@ -183,69 +166,31 @@ export default function ImageUploader({
     onStart();
     const ac = new AbortController();
     abortRef.current = ac;
-    let gotAnalysis = false;
 
     try {
-      const dataUrls = await Promise.all(files.map(fileToDataUrl));
+      const dataUrls = await Promise.all(files.map((f) => compressImage(f)));
+      const payloadBytes = dataUrls.reduce((sum, u) => sum + dataUrlBytes(u), 0);
+      if (payloadBytes > MAX_PAYLOAD_BYTES) {
+        onAnalysisError({
+          message:
+            "Le foto sono troppo pesanti anche dopo la compressione (probabilmente HEIC non supportato da questo browser). Esportale in JPG e riprova.",
+          code: "INVALID_INPUT",
+        });
+        return;
+      }
       const trimmedDimensions = dimensions.trim();
       const trimmedOwned = ownedItems.trim();
-      const res = await fetch("/api/recommend", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: ac.signal,
-        body: JSON.stringify({
+      await streamRecommend(
+        {
           images: dataUrls,
           ...(trimmedDimensions ? { dimensions: trimmedDimensions } : {}),
           ...(budget ? { budget } : {}),
           ...(goal ? { goal } : {}),
           ...(trimmedOwned ? { ownedItems: trimmedOwned } : {}),
-        }),
-      });
-
-      if (!res.ok || !res.body) {
-        let message = "Errore di rete";
-        let code: string | undefined;
-        try {
-          const j = await res.json();
-          message = j.error ?? message;
-          code = j.code;
-        } catch {
-          /* corpo non JSON */
-        }
-        onAnalysisError({ message, code });
-        return;
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split("\n\n");
-        buffer = chunks.pop() ?? "";
-        for (const chunk of chunks) {
-          const ev = parseSseChunk(chunk);
-          if (!ev) continue;
-          if (ev.event === "analysis") {
-            gotAnalysis = true;
-            onAnalysis(ev.data as RoomAnalysis);
-          } else if (ev.event === "product") {
-            onProduct(ev.data as Product);
-          } else if (ev.event === "shared") {
-            onShared((ev.data as { id: string }).id);
-          } else if (ev.event === "error") {
-            const err = ev.data as { code?: string; message: string };
-            if (err.code === "NOT_A_ROOM" || !gotAnalysis) {
-              onAnalysisError({ message: err.message, code: err.code });
-            } else {
-              onProductsError({ message: err.message, code: err.code });
-            }
-          }
-        }
-      }
+        },
+        { onAnalysis, onAnalysisError, onProduct, onProductsError, onWarning, onShared },
+        ac.signal
+      );
     } catch (err) {
       if ((err as Error).name === "AbortError") return;
       onAnalysisError({
@@ -266,6 +211,7 @@ export default function ImageUploader({
     onAnalysisError,
     onProduct,
     onProductsError,
+    onWarning,
     onShared,
     onComplete,
   ]);
@@ -323,13 +269,13 @@ export default function ImageUploader({
           </span>
           <span className="text-sm text-brand-text-muted">
             {canAddMore
-              ? `JPG o PNG, max ${MAX_IMAGES} immagini (${files.length}/${MAX_IMAGES} selezionate)`
+              ? `JPG, PNG, WebP o HEIC, max ${MAX_IMAGES} immagini (${files.length}/${MAX_IMAGES} selezionate)`
               : `${MAX_IMAGES}/${MAX_IMAGES} immagini caricate`}
           </span>
           <input
             ref={inputRef}
             type="file"
-            accept="image/*"
+            accept={ACCEPTED_TYPES}
             multiple
             className="hidden"
             onChange={handleSelect}
