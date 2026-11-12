@@ -99,7 +99,7 @@ RoomAdvisor also ships as an installable desktop app for **Windows, macOS and Li
 
 1. Open the [Releases](https://github.com/nassim2345/RoomAdvisor/releases) page and download the file for your system:
    - **Windows** → `RoomAdvisor-Setup-x.y.z.exe`
-   - **macOS** → `RoomAdvisor-x.y.z-arm64.dmg` (Apple Silicon) or `RoomAdvisor-x.y.z-x64.dmg` (Intel)
+   - **macOS** → `RoomAdvisor-x.y.z-arm64.dmg` (Apple Silicon) or `RoomAdvisor-x.y.z-x64.dmg` (Intel); a `-mac.zip` of each is also provided
    - **Linux** → `RoomAdvisor-x.y.z.AppImage` (any distro) or `roomadvisor_x.y.z_amd64.deb` (Debian/Ubuntu)
 2. Install it like any other app.
 3. On first launch, paste your two API keys (Gemini + SerpAPI, both have free tiers). You can change them later from the **Chiavi API…** menu (`Ctrl/Cmd + ,`).
@@ -114,7 +114,7 @@ Keys are stored only on your computer, in the app's data folder, encrypted with 
 
 ### Publish a new version
 
-Bump `"version"` in `package.json` (e.g. `0.2.0`) and merge into `main`. The **Desktop release** workflow notices there's no `v0.2.0` release yet, builds the five installers on Windows, macOS and Linux runners, and publishes them as a GitHub Release. Pushing a `v*` tag works too. To build without publishing, run the workflow manually from the Actions tab: the installers appear as artifacts of the run.
+Bump `"version"` in `package.json` (e.g. `0.2.0`) and merge into `main`. The **Desktop release** workflow notices there's no `v0.2.0` release yet, builds the installers on Windows, macOS and Linux runners, and publishes them as a GitHub Release. Pushing a `v*` tag works too. To build without publishing, run the workflow manually from the Actions tab: the installers appear as artifacts of the run.
 
 ### Run or build locally
 
