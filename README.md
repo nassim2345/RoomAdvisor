@@ -12,7 +12,9 @@ You upload photos. Two things happen in parallel: one model looks at the room an
 
 If the photo isn't a room, it says so instead of returning garbage.
 
-You can set a budget per item and enter the room dimensions manually if you want more accurate recommendations. There's a shareable link after each analysis — it expires after 24 hours.
+You can set a budget per item and enter the room dimensions manually if you want more accurate recommendations. Each category comes with up to three options — hit **Cambia** to swap one, and the set total updates live. There's a shareable link after each analysis (it expires after 24 hours), and it unfurls on social/chat apps as a preview card with the room's palette and style.
+
+Photos are resized in the browser (max 1600px, JPEG) before upload: a 9 MB phone photo goes out as ~200 KB, which keeps requests well under Vercel's 4.5 MB body limit and makes the analysis faster.
 
 ---
 
@@ -57,13 +59,14 @@ Open [http://localhost:3000](http://localhost:3000).
 | `npm run start` | Start production build |
 | `npm run lint` | ESLint |
 | `npm run type-check` | `tsc --noEmit` |
+| `npm test` | Unit + route integration tests (Vitest, Gemini/SerpAPI mocked) |
 | `node scripts/smoke-recommend.mjs` | Smoke test the main endpoint (needs dev server + a `test-room.jpg` in root) |
 
 ---
 
 ## Endpoints
 
-**`POST /api/recommend`** — the only endpoint the client uses. Accepts `{ images, dimensions?, budget?, goal?, ownedItems? }`, returns `text/event-stream`. Emits `analysis`, then `product` events one by one, then `shared` and `done`. Emits `error` with code `NOT_A_ROOM` if the images don't show a room. Returns `HTTP 429 { code: "RATE_LIMITED" }` (plain JSON, not SSE) when the per-IP rate limit is hit.
+**`POST /api/recommend`** — the only endpoint the client uses. Accepts `{ images, dimensions?, budget?, goal?, ownedItems? }`, returns `text/event-stream`. Emits `analysis`, then `product` events one by one (each with a `rank` for stable ordering and up to two `alternatives`), an optional `warning` if some categories failed, then `shared` and `done`. Emits `error` with code `NOT_A_ROOM` if the images don't show a room. Returns `HTTP 429 { code: "RATE_LIMITED" }` (plain JSON, not SSE) when the per-IP rate limit is hit.
 
 **`GET /api/share/[id]`** — returns a saved result by ID. 404 if expired or not found.
 
@@ -79,11 +82,12 @@ Three steps:
 2. Set environment variables in the project settings:
    - `GEMINI_API_KEY`
    - `SERPAPI_KEY`
-3. Deploy.
+3. Add a Redis store: Vercel → Storage → Upstash for Redis (or set `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`). Without it, shared links and rate limiting fall back to per-instance memory, and shared links will 404 whenever a request lands on a different instance.
+4. Deploy.
 
 Security headers (`X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, `Strict-Transport-Security`) and `productionBrowserSourceMaps: false` are configured in `next.config.mjs` and apply automatically.
 
-**Honest note on rate limiting:** the in-memory limiter (10 req/IP/60s on `/api/recommend`) is a stopgap. On Vercel with multiple concurrent function instances the effective limit is roughly N×10 — it deters trivial abuse but does not protect against a determined attacker. For real protection put a distributed limiter (Upstash, Vercel KV) or a WAF in front.
+**Rate limiting:** 10 req/IP/60s on `/api/recommend`, fixed window. With Redis configured it is shared across instances; the client IP comes from `x-real-ip` (set by Vercel, not spoofable). If Redis is unreachable the limiter fails open to the per-instance memory limit.
 
 ---
 
@@ -92,21 +96,27 @@ Security headers (`X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-P
 ```
 app/
   api/
-    recommend/route.ts    # SSE streaming endpoint
+    recommend/route.ts    # SSE pipeline: analyze+plan (parallel) → search → share
     share/[id]/route.ts   # GET shared result
-  results/[id]/           # shared result page (read-only)
+  results/[id]/           # shared result page + generated Open Graph image
   layout.tsx, page.tsx
 components/
-  ImageUploader.tsx       # drag & drop, SSE consumer, budget/dimensions inputs
-  ResultsPanel.tsx        # colors, style, dimensions
-  ProductsPanel.tsx       # product grid, streams in incrementally
-  ShareButton.tsx, ResetButton.tsx, Skeleton.tsx
+  ImageUploader.tsx       # drag & drop, compression, form inputs
+  ResultsPanel.tsx        # colors (click to copy), style, dimensions
+  ProductsPanel.tsx       # product grid, alternatives, set total
+  ShareButton.tsx, ResetButton.tsx, Skeleton.tsx, IssuesPanel.tsx
 lib/
-  gemini.ts               # Gemini client, vision model, image planner model
-  prompts.ts              # system instructions and JSON schemas
-  serpapi.ts              # Google Shopping wrapper with price filter
-  share-store.ts          # in-memory TTL store for shared results
-  budget.ts, types.ts
+  gemini.ts, prompts.ts   # Gemini models, system instructions, JSON schemas
+  serpapi.ts              # Google Shopping wrapper: options, budget filter, URL safety
+  validation.ts           # request parsing, analysis schema checks
+  kv.ts                   # dependency-free Redis REST client (Upstash / Vercel KV)
+  share-store.ts          # shared results (Redis, memory fallback)
+  rate-limit.ts           # distributed rate limiter (Redis, memory fallback)
+  async.ts                # timeouts linked to client aborts, retry with backoff
+  sse.ts                  # SSE formatting + incremental parser
+  recommend-client.ts     # browser client for the SSE endpoint
+  image.ts, products.ts, color.ts, budget.ts, types.ts
+tests/                    # Vitest
 scripts/smoke-recommend.mjs
 ```
 
@@ -114,10 +124,10 @@ scripts/smoke-recommend.mjs
 
 ## Known limitations
 
-- Shared results are stored in memory. They disappear on server restart. In production, swap `lib/share-store.ts` for Redis or Vercel KV.
+- Without Redis configured, shared results live in memory and disappear on restart.
 - Photos are never saved — only the analysis and product list go into the share store.
-- Rate limiting is in-memory and per-instance, not distributed (see Deploy note above).
-- The Google Shopping price filter (`tbs ppr_max`) is best-effort. Some results will be over budget.
+- The Google Shopping price filter (`tbs ppr_max`) is best-effort; results with a known price above budget are dropped server-side, results without a price are kept.
+- HEIC photos can't be decoded by most non-Safari browsers, so they're sent uncompressed; if they exceed the size limit the user is asked to export as JPG.
 - The project is pinned to Next.js 14.2.x. `npm audit` reports 4 high-severity advisories on Next 14 (image optimizer DoS, request smuggling, SSRF on websocket upgrades, cache poisoning); all fixes require a major bump to Next 16, which is a separate review.
 
 ---
