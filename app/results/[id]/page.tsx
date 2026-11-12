@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cache } from "react";
 import { notFound } from "next/navigation";
 import IssuesPanel from "@/components/IssuesPanel";
 import ProductsPanel from "@/components/ProductsPanel";
@@ -9,13 +10,36 @@ import { getShared } from "@/lib/share-store";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "Risultato condiviso — RoomAdvisor",
-  description: "Analisi della stanza e consigli d'arredo condivisi.",
-};
+type Props = { params: { id: string } };
 
-export default function ResultsPage({ params }: { params: { id: string } }) {
-  const result = getShared(params.id);
+// Deduplica la lettura tra generateMetadata e la pagina nella stessa richiesta.
+const loadShared = cache(async (id: string) => {
+  try {
+    return await getShared(id);
+  } catch {
+    return null;
+  }
+});
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const result = await loadShared(params.id);
+  if (!result) {
+    return { title: "Risultato non trovato — RoomAdvisor", robots: { index: false } };
+  }
+  const { style } = result.analysis;
+  const count = result.products.length;
+  const description = `Stile: ${style}. ${count} pezzi d'arredo consigliati da RoomAdvisor.`;
+  return {
+    title: `${style} — RoomAdvisor`,
+    description,
+    robots: { index: false },
+    openGraph: { title: `La mia stanza: ${style}`, description, type: "website" },
+    twitter: { card: "summary_large_image", title: `La mia stanza: ${style}`, description },
+  };
+}
+
+export default async function ResultsPage({ params }: Props) {
+  const result = await loadShared(params.id);
   if (!result) notFound();
 
   return (

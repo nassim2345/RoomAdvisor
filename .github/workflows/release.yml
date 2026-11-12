@@ -1,0 +1,128 @@
+name: Desktop release
+
+# Compila gli installer dell'app desktop (Windows, macOS, Linux) e li pubblica
+# in una Release di GitHub.
+#
+# Quando parte:
+# - push su main con una versione in package.json che non ha ancora una
+#   Release (es. alzi "version" a 0.2.0 e unisci in main) → Release v0.2.0
+# - push di un tag "v*" (es. v0.2.0) → Release con quel nome; la versione
+#   dell'app viene presa dal tag
+# - avvio manuale (Actions → Desktop release → Run workflow) → compila
+#   soltanto e allega gli installer all'esecuzione, senza pubblicare
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      release: ${{ steps.plan.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            release=true
+          else
+            version="$(node -p 'require("./package.json").version')"
+            if [[ "$GITHUB_EVENT_NAME" == "push" ]] && ! gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              release=true
+            else
+              release=false
+            fi
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          echo "Versione $version — pubblicazione: $release"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.release == 'true' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win
+          - os: macos-latest
+            target: --mac
+          - os: ubuntu-latest
+            target: --linux
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Imposta la versione
+        shell: bash
+        run: npm version "${{ needs.plan.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Build server
+        run: npm run desktop:prepare
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Installer
+        run: npx electron-builder ${{ matrix.target }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RoomAdvisor-${{ runner.os }}
+          path: |
+            dist-desktop/*.exe
+            dist-desktop/*.dmg
+            dist-desktop/*.AppImage
+            dist-desktop/*.deb
+          if-no-files-found: error
+
+  release:
+    needs: [plan, build]
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: RoomAdvisor-*
+          path: installers
+          merge-multiple: true
+
+      - name: Crea la Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          ls -la installers
+          sed "s/{{VERSION}}/$VERSION/g" .github/release-notes.md > notes.md
+          gh release create "v$VERSION" installers/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "RoomAdvisor $VERSION" \
+            --notes-file notes.md

@@ -42,3 +42,6 @@ not-a-room.jpg
 # Claude Code (personal config, not for public repo)
 .claude/
 
+
+# desktop app
+/dist-desktop

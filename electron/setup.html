@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; img-src 'self'"
+    />
+    <title>RoomAdvisor — Configurazione</title>
+    <style>
+      :root {
+        --bg: #FAF7F2; --surface: #FFFFFF; --muted: #EFEAE1; --border: #E5DDD0;
+        --text: #1F1B17; --text-muted: #6B645A; --accent: #2A2622; --accent-hover: #0F0D0B;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body {
+        background: var(--bg); color: var(--text);
+        font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        display: flex; justify-content: center; padding: 48px 16px;
+      }
+      main { width: 100%; max-width: 520px; }
+      header { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
+      header img { width: 52px; height: 52px; }
+      h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+      header p { margin: 2px 0 0; color: var(--text-muted); }
+      .card {
+        background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
+        padding: 24px; box-shadow: 0 1px 2px rgba(0,0,0,.04);
+      }
+      .intro { margin: 0 0 20px; color: var(--text-muted); }
+      label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+      .field { margin-bottom: 18px; }
+      input {
+        width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border);
+        font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); background: #fff;
+      }
+      input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .hint { margin-top: 6px; font-size: 13px; color: var(--text-muted); }
+      .hint a { color: var(--text); }
+      .saved { display: inline-block; margin-left: 6px; font-size: 12px; font-weight: 500; color: #047857; }
+      .saved[hidden] { display: none; }
+      button {
+        width: 100%; margin-top: 6px; padding: 12px; border: 0; border-radius: 10px;
+        background: var(--accent); color: #fff; font-weight: 600; font-size: 15px; cursor: pointer;
+      }
+      button:hover { background: var(--accent-hover); }
+      button:disabled { opacity: .5; cursor: progress; }
+      .error {
+        display: none; margin-top: 14px; padding: 10px 12px; border-radius: 10px;
+        background: #FEF2F2; border: 1px solid #FECACA; color: #991B1B; font-size: 14px;
+      }
+      .privacy { margin-top: 16px; font-size: 13px; color: var(--text-muted); text-align: center; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <img src="../build/icon.png" alt="" />
+        <div>
+          <h1>Benvenuto in RoomAdvisor</h1>
+          <p>Configurazione iniziale, serve una volta sola.</p>
+        </div>
+      </header>
+
+      <form class="card" id="form" novalidate>
+        <p class="intro">
+          RoomAdvisor usa due servizi esterni con le <strong>tue</strong> chiavi: Gemini per analizzare
+          le foto e SerpAPI per cercare i prodotti. Entrambi hanno un piano gratuito.
+        </p>
+
+        <div class="field">
+          <label for="gemini">Chiave Gemini <span class="saved" id="gemini-saved" hidden>✓ salvata</span></label>
+          <input id="gemini" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…" />
+          <div class="hint">
+            Creala gratis su <a href="#" data-href="https://aistudio.google.com/apikey">Google AI Studio</a>.
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="serpapi">Chiave SerpAPI <span class="saved" id="serpapi-saved" hidden>✓ salvata</span></label>
+          <input id="serpapi" type="password" autocomplete="off" spellcheck="false" placeholder="64 caratteri esadecimali" />
+          <div class="hint">
+            La trovi su <a href="#" data-href="https://serpapi.com/manage-api-key">serpapi.com</a> (100 ricerche/mese gratis).
+          </div>
+        </div>
+
+        <button type="submit" id="submit">Salva e avvia</button>
+        <div class="error" id="error" role="alert"></div>
+      </form>
+
+      <p class="privacy">
+        Le chiavi restano su questo computer, cifrate dal sistema operativo dove possibile.
+        Puoi cambiarle dal menu <em>Chiavi API…</em>
+      </p>
+    </main>
+    <script src="setup.js"></script>
+  </body>
+</html>
