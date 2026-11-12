@@ -5,6 +5,7 @@
 | **Windows** 10/11 | `RoomAdvisor-Setup-{{VERSION}}.exe` |
 | **macOS** Apple Silicon (M1/M2/M3/M4) | `RoomAdvisor-{{VERSION}}-arm64.dmg` |
 | **macOS** Intel | `RoomAdvisor-{{VERSION}}-x64.dmg` |
+| macOS, in alternativa al DMG | `RoomAdvisor-{{VERSION}}-arm64-mac.zip` / `RoomAdvisor-{{VERSION}}-x64-mac.zip`: estrai e trascina l'app in Applicazioni |
 | **Linux** (qualsiasi distro) | `RoomAdvisor-{{VERSION}}.AppImage` |
 | **Linux** Debian / Ubuntu | `roomadvisor_{{VERSION}}_amd64.deb` |
 

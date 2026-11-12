@@ -66,10 +66,10 @@ jobs:
             target: --win
           - name: macOS-arm64
             os: macos-latest
-            target: --mac --arm64
+            arch: --arm64
           - name: macOS-x64
             os: macos-latest
-            target: --mac --x64
+            arch: --x64
           - name: Linux
             os: ubuntu-latest
             target: --linux
@@ -100,9 +100,31 @@ jobs:
         run: sudo mdutil -a -i off
 
       - name: Installer
+        if: runner.os != 'macOS'
         run: npx electron-builder ${{ matrix.target }} --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      # macOS: lo ZIP non usa hdiutil ed è sempre affidabile; il DMG è più
+      # comodo ma dipende dai dischi virtuali del runner, quindi un suo
+      # errore non blocca la Release.
+      - name: Installer macOS (zip)
+        if: runner.os == 'macOS'
+        run: npx electron-builder --mac zip ${{ matrix.arch }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Installer macOS (dmg)
+        id: dmg
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: npx electron-builder --mac dmg ${{ matrix.arch }} --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Scarta un DMG incompleto
+        if: runner.os == 'macOS' && steps.dmg.outcome == 'failure'
+        run: rm -f dist-desktop/*.dmg
 
       - uses: actions/upload-artifact@v4
         with:
@@ -110,6 +132,7 @@ jobs:
           path: |
             dist-desktop/*.exe
             dist-desktop/*.dmg
+            dist-desktop/*-mac.zip
             dist-desktop/*.AppImage
             dist-desktop/*.deb
           if-no-files-found: error

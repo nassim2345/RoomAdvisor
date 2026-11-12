@@ -69,20 +69,34 @@
     "mac": {
       "category": "public.app-category.lifestyle",
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64",
-            "x64"
-          ]
-        }
+        "dmg",
+        "zip"
       ],
       "identity": null,
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "RoomAdvisor-${version}-${arch}-mac.${ext}"
     },
     "dmg": {
       "title": "RoomAdvisor",
-      "artifactName": "RoomAdvisor-${version}-${arch}.${ext}"
+      "artifactName": "RoomAdvisor-${version}-${arch}.${ext}",
+      "backgroundColor": "#FAF7F2",
+      "contents": [
+        {
+          "x": 150,
+          "y": 190,
+          "type": "file"
+        },
+        {
+          "x": 390,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
     },
     "win": {
       "target": [
