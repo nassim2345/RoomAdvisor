@@ -1,387 +1,348 @@
 import { NextResponse } from "next/server";
-import { isValidBudget } from "@/lib/budget";
-import { getImagePlanningModel, getVisionModel } from "@/lib/gemini";
-import { buildImagePlanPrompt, buildUserPrompt } from "@/lib/prompts";
-import { SerpApiError, searchShopping } from "@/lib/serpapi";
-import { setShared } from "@/lib/share-store";
+import { isAbortError, withRetry, withTimeout } from "@/lib/async";
 import {
-  isGoal,
-  type AnalyzeError,
-  type AnalyzeErrorCode,
-  type FurnitureQuery,
-  type Product,
-  type RecommendRequest,
-  type RoomAnalysis,
+  getImagePlanningModel,
+  getVisionModel,
+  isRetryableGeminiError,
+} from "@/lib/gemini";
+import { buildImagePlanPrompt, buildUserPrompt } from "@/lib/prompts";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { isConfigError, searchShopping } from "@/lib/serpapi";
+import { setShared } from "@/lib/share-store";
+import { formatSseEvent } from "@/lib/sse";
+import type {
+  AnalyzeError,
+  AnalyzeErrorCode,
+  FurnitureQuery,
+  Product,
+  RoomAnalysis,
 } from "@/lib/types";
+import {
+  isNotARoom,
+  isRoomAnalysis,
+  parseRecommendRequest,
+  type ImagePart,
+  type ValidRecommendRequest,
+} from "@/lib/validation";
+import type { GenerativeModel } from "@google/generative-ai";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const DATA_URL_RE = /^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/;
-const HEX_RE = /^#[0-9A-Fa-f]{6}$/;
-const MAX_IMAGES = 3;
-const MAX_TOTAL_BYTES = 15 * 1024 * 1024;
 const MAX_ITEMS = 5;
-const MAX_OWNED_ITEMS_CHARS = 300;
 const STAGE1_TIMEOUT_MS = 30_000;
 const STAGE3_TIMEOUT_MS = 20_000;
+const GEMINI_RETRIES = 2;
+const GEMINI_RETRY_BASE_MS = 600;
 
-// Rate limiter in-memory, non distribuito. Su Vercel con istanze multiple il
-// limite effettivo può essere N×10. Stopgap per traffico basso, non protezione
-// da abuso reale.
-const RATE_LIMIT_MAX = 10;
-const RATE_LIMIT_WINDOW_MS = 60_000;
-const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
-
-function getClientIp(req: Request): string {
-  const fwd = req.headers.get("x-forwarded-for") ?? "";
-  const first = fwd.split(",")[0]?.trim();
-  return first || "unknown";
+interface StreamErrorPayload {
+  code: AnalyzeErrorCode;
+  message: string;
 }
 
-function checkRateLimit(ip: string): { allowed: boolean; retryAfter: number } {
-  const now = Date.now();
-  // Cleanup lazy: rimuovi entry scadute. Niente setInterval (anti-pattern serverless).
-  rateLimitStore.forEach((entry, key) => {
-    if (entry.resetAt < now) rateLimitStore.delete(key);
-  });
-  const existing = rateLimitStore.get(ip);
-  if (!existing || existing.resetAt < now) {
-    rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return { allowed: true, retryAfter: 0 };
+/** Segnala un errore all'utente e termina la pipeline. */
+class PipelineStop extends Error {
+  constructor(readonly payload: StreamErrorPayload) {
+    super(payload.message);
   }
-  if (existing.count >= RATE_LIMIT_MAX) {
-    return {
-      allowed: false,
-      retryAfter: Math.max(1, Math.ceil((existing.resetAt - now) / 1000)),
-    };
-  }
-  existing.count++;
-  return { allowed: true, retryAfter: 0 };
 }
-
-type ImagePart = { inlineData: { mimeType: string; data: string } };
 
 function jsonError(code: AnalyzeErrorCode, message: string, status: number) {
   const body: AnalyzeError = { error: message, code };
   return NextResponse.json(body, { status });
 }
 
-function isRoomAnalysis(x: RoomAnalysis): boolean {
+function mapGeminiError(err: unknown, timedOut: boolean): StreamErrorPayload {
+  if (timedOut || isAbortError(err)) {
+    return { code: "UPSTREAM_ERROR", message: "Analisi scaduta, riprova" };
+  }
+  const e = err as { status?: number; message?: string };
+  if (e?.status === 429) {
+    return {
+      code: "RATE_LIMITED",
+      message: "Il servizio di analisi è sovraccarico, riprova tra qualche secondo",
+    };
+  }
+  const msg = e?.message ?? "Errore chiamata Gemini";
+  if (msg.includes("GEMINI_API_KEY")) return { code: "INTERNAL", message: msg };
+  if (err instanceof SyntaxError) {
+    return { code: "UPSTREAM_ERROR", message: "Risposta Gemini non valida" };
+  }
+  return { code: "UPSTREAM_ERROR", message: msg };
+}
+
+async function generateJson<T>(
+  model: GenerativeModel,
+  prompt: string,
+  imageParts: ImagePart[],
+  signal: AbortSignal
+): Promise<T> {
+  const result = await withRetry(
+    () =>
+      model.generateContent(
+        { contents: [{ role: "user", parts: [{ text: prompt }, ...imageParts] }] },
+        { signal }
+      ),
+    {
+      retries: GEMINI_RETRIES,
+      baseDelayMs: GEMINI_RETRY_BASE_MS,
+      shouldRetry: isRetryableGeminiError,
+      signal,
+    }
+  );
+  return JSON.parse(result.response.text()) as T;
+}
+
+function isValidPlan(items: unknown): items is FurnitureQuery[] {
   return (
-    Array.isArray(x.colors) &&
-    x.colors.length >= 1 &&
-    x.colors.length <= 5 &&
-    x.colors.every((c) => typeof c === "string" && HEX_RE.test(c)) &&
-    typeof x.style === "string" &&
-    typeof x.dimensions === "string" &&
-    ["low", "medium", "high"].includes(x.confidence) &&
-    Array.isArray(x.observations) &&
-    x.observations.length <= 5 &&
-    x.observations.every((o) => typeof o === "string") &&
-    Array.isArray(x.issues) &&
-    x.issues.length <= 5 &&
-    x.issues.every(
-      (i) => typeof i?.title === "string" && typeof i?.description === "string"
+    Array.isArray(items) &&
+    items.length > 0 &&
+    items.every(
+      (i) =>
+        typeof i?.category === "string" &&
+        typeof i?.query === "string" &&
+        i.query.trim().length > 0
     )
   );
 }
 
+/**
+ * Stadio 1: vision e planner in parallelo (il planner non dipende dall'output
+ * della vision). Se la vision fallisce o le foto non mostrano una stanza, il
+ * planner viene cancellato da `dispose()`.
+ */
+async function analyzeAndPlan(
+  input: ValidRecommendRequest,
+  parent: AbortSignal,
+  onAnalysis: (a: RoomAnalysis) => void
+): Promise<{ analysis: RoomAnalysis; plan: FurnitureQuery[] }> {
+  const stage = withTimeout(parent, STAGE1_TIMEOUT_MS);
+  try {
+    const planPromise = generateJson<{ items: unknown }>(
+      getImagePlanningModel(),
+      buildImagePlanPrompt(input.budget, input.goal, input.ownedItems),
+      input.imageParts,
+      stage.signal
+    );
+    // Evita "unhandled rejection" se usciamo prima di attenderlo.
+    planPromise.catch(() => {});
+
+    let raw: unknown;
+    try {
+      raw = await generateJson<unknown>(
+        getVisionModel(),
+        buildUserPrompt(input.imageParts.length, input.dimensions),
+        input.imageParts,
+        stage.signal
+      );
+    } catch (err) {
+      throw new PipelineStop(mapGeminiError(err, stage.timedOut));
+    }
+
+    if (isNotARoom(raw)) {
+      throw new PipelineStop({
+        code: "NOT_A_ROOM",
+        message:
+          "Le immagini non sembrano mostrare una stanza. Riprova con foto degli interni.",
+      });
+    }
+    if (!isRoomAnalysis(raw)) {
+      throw new PipelineStop({
+        code: "UPSTREAM_ERROR",
+        message: "Risposta Gemini non conforme allo schema atteso",
+      });
+    }
+    const analysis: RoomAnalysis = {
+      ...raw,
+      colors: raw.colors.map((c) => c.toUpperCase()),
+    };
+    onAnalysis(analysis);
+
+    let plan: { items: unknown };
+    try {
+      plan = await planPromise;
+    } catch (err) {
+      throw new PipelineStop(mapGeminiError(err, stage.timedOut));
+    }
+    if (!isValidPlan(plan?.items)) {
+      throw new PipelineStop({
+        code: "UPSTREAM_ERROR",
+        message: "Piano d'arredo Gemini non conforme allo schema",
+      });
+    }
+    return { analysis, plan: plan.items };
+  } finally {
+    stage.dispose();
+  }
+}
+
+/**
+ * Stadio 3: una ricerca SerpAPI per categoria, in parallelo. Ogni prodotto
+ * viene emesso appena arriva; un singolo fallimento non blocca gli altri.
+ */
+async function searchProducts(
+  plan: FurnitureQuery[],
+  budget: number | undefined,
+  parent: AbortSignal,
+  onProduct: (p: Product) => void,
+  onWarning: (e: StreamErrorPayload) => void
+): Promise<Product[]> {
+  const stage = withTimeout(parent, STAGE3_TIMEOUT_MS);
+  const priceRange = budget !== undefined ? { max: budget } : undefined;
+  const products: Product[] = [];
+  let aborts = 0;
+  let failures = 0;
+  let configError: string | null = null;
+
+  // Una sola query per categoria, nell'ordine del piano.
+  const seen = new Set<string>();
+  const queries = plan
+    .filter((item) => {
+      const key = item.category.trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, MAX_ITEMS);
+
+  try {
+    await Promise.all(
+      queries.map(async (item, rank) => {
+        try {
+          const found = await searchShopping(
+            item.query,
+            item.category,
+            priceRange,
+            stage.signal
+          );
+          if (found) {
+            const product: Product = { ...found, rank };
+            products.push(product);
+            onProduct(product);
+          }
+        } catch (err) {
+          if (isAbortError(err) || stage.signal.aborted) aborts++;
+          else if (isConfigError(err)) configError = (err as Error).message;
+          else failures++;
+        }
+      })
+    );
+  } finally {
+    stage.dispose();
+  }
+
+  if (products.length === 0) {
+    if (configError) throw new PipelineStop({ code: "INTERNAL", message: configError });
+    if (aborts > 0) {
+      throw new PipelineStop({
+        code: "UPSTREAM_ERROR",
+        message: "Ricerca prodotti scaduta, riprova",
+      });
+    }
+    if (failures > 0) {
+      throw new PipelineStop({
+        code: "UPSTREAM_ERROR",
+        message: "Ricerca prodotti non disponibile al momento, riprova più tardi",
+      });
+    }
+  } else if (failures + aborts > 0) {
+    const missed = failures + aborts;
+    onWarning({
+      code: "UPSTREAM_ERROR",
+      message:
+        missed === 1
+          ? `Una categoria su ${queries.length} non è stata cercata per un errore temporaneo.`
+          : `${missed} categorie su ${queries.length} non sono state cercate per un errore temporaneo.`,
+    });
+  }
+
+  return products.sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0));
+}
+
 export async function POST(req: Request) {
   // 1° controllo: rate limit (HTTP 429 puro, non SSE). Costa quasi nulla.
-  const ip = getClientIp(req);
-  const rl = checkRateLimit(ip);
+  const rl = await checkRateLimit(getClientIp(req));
   if (!rl.allowed) {
     return NextResponse.json(
-      { error: "Too many requests", code: "RATE_LIMITED" },
+      { error: "Troppe richieste, riprova tra poco", code: "RATE_LIMITED" },
       { status: 429, headers: { "Retry-After": String(rl.retryAfter) } }
     );
   }
 
-  let body: RecommendRequest;
+  let body: unknown;
   try {
-    body = (await req.json()) as RecommendRequest;
+    body = await req.json();
   } catch {
     return jsonError("INVALID_INPUT", "Body JSON non valido", 400);
   }
+  const parsed = parseRecommendRequest(body);
+  if (!parsed.ok) return jsonError("INVALID_INPUT", parsed.message, 400);
+  const input = parsed.value;
 
-  if (
-    !body ||
-    !Array.isArray(body.images) ||
-    body.images.length === 0 ||
-    body.images.length > MAX_IMAGES
-  ) {
-    return jsonError(
-      "INVALID_INPUT",
-      `Il campo "images" deve essere un array di 1-${MAX_IMAGES} elementi`,
-      400
-    );
-  }
-
-  if (body.budget !== undefined && !isValidBudget(body.budget)) {
-    return jsonError(
-      "INVALID_INPUT",
-      'Campo "budget" deve essere un numero positivo (euro massimi per pezzo)',
-      400
-    );
-  }
-
-  if (body.goal !== undefined && !isGoal(body.goal)) {
-    return jsonError(
-      "INVALID_INPUT",
-      'Campo "goal" non valido (atteso: cozy, minimal, japandi, industrial, scandinavian, modern, luxury)',
-      400
-    );
-  }
-
-  if (body.ownedItems !== undefined) {
-    if (typeof body.ownedItems !== "string") {
-      return jsonError("INVALID_INPUT", 'Campo "ownedItems" deve essere una stringa', 400);
-    }
-    if (body.ownedItems.trim().length > MAX_OWNED_ITEMS_CHARS) {
-      return jsonError(
-        "INVALID_INPUT",
-        `Campo "ownedItems" supera ${MAX_OWNED_ITEMS_CHARS} caratteri`,
-        400
-      );
-    }
-  }
-
-  const imageParts: ImagePart[] = [];
-  let totalBytes = 0;
-  for (let i = 0; i < body.images.length; i++) {
-    const dataUrl = body.images[i];
-    if (typeof dataUrl !== "string") {
-      return jsonError("INVALID_INPUT", `images[${i}] non è una stringa`, 400);
-    }
-    const match = DATA_URL_RE.exec(dataUrl);
-    if (!match) {
-      return jsonError(
-        "INVALID_INPUT",
-        `images[${i}] non è una data URL base64 valida`,
-        400
-      );
-    }
-    const [, mimeType, data] = match;
-    totalBytes += Math.floor((data.length * 3) / 4);
-    if (totalBytes > MAX_TOTAL_BYTES) {
-      return jsonError(
-        "INVALID_INPUT",
-        `Dimensione totale immagini supera ${MAX_TOTAL_BYTES} byte`,
-        400
-      );
-    }
-    imageParts.push({ inlineData: { mimeType, data } });
-  }
-
-  const dimensions =
-    typeof body.dimensions === "string" ? body.dimensions : undefined;
-  const budget = isValidBudget(body.budget) ? body.budget : undefined;
-  const priceRange = budget !== undefined ? { max: budget } : undefined;
-  const goal = isGoal(body.goal) ? body.goal : undefined;
-  const ownedItems =
-    typeof body.ownedItems === "string" && body.ownedItems.trim().length > 0
-      ? body.ownedItems.trim()
-      : undefined;
+  // Abortito se il client chiude la connessione: ferma Gemini e SerpAPI.
+  const lifecycle = new AbortController();
+  const onClientAbort = () => lifecycle.abort();
+  req.signal?.addEventListener("abort", onClientAbort, { once: true });
 
   const encoder = new TextEncoder();
-
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      let closed = false;
       const send = (type: string, data: unknown) => {
-        controller.enqueue(
-          encoder.encode(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`)
-        );
-      };
-      const isAbortError = (err: unknown): boolean => {
-        const e = err as { name?: string };
-        return e?.name === "AbortError";
-      };
-      const mapGeminiError = (
-        err: unknown
-      ): { code: AnalyzeErrorCode; message: string } => {
-        const e = err as { status?: number; message?: string };
-        if (e.status === 429)
-          return { code: "RATE_LIMITED", message: "Rate limit Gemini raggiunto" };
-        const msg = e.message ?? "Errore chiamata Gemini";
-        if (msg.includes("GEMINI_API_KEY"))
-          return { code: "INTERNAL", message: msg };
-        return { code: "UPSTREAM_ERROR", message: msg };
-      };
-
-      // Stadio 1 — controller condiviso fra vision e planner (timeout 30s).
-      const stage1Abort = new AbortController();
-      const stage1Timer = setTimeout(
-        () => stage1Abort.abort(),
-        STAGE1_TIMEOUT_MS
-      );
-
-      // Planner parallelo a vision: non dipende dal suo output.
-      const planPromise = (async (): Promise<
-        { ok: true; items: FurnitureQuery[] } | { ok: false; error: unknown }
-      > => {
+        if (closed) return;
         try {
-          const model = getImagePlanningModel();
-          const result = await model.generateContent(
-            {
-              contents: [
-                {
-                  role: "user",
-                  parts: [
-                    { text: buildImagePlanPrompt(budget, goal, ownedItems) },
-                    ...imageParts,
-                  ],
-                },
-              ],
-            },
-            { signal: stage1Abort.signal }
-          );
-          const parsed = JSON.parse(result.response.text()) as {
-            items: FurnitureQuery[];
-          };
-          return { ok: true, items: parsed.items };
-        } catch (error) {
-          return { ok: false, error };
+          controller.enqueue(encoder.encode(formatSseEvent(type, data)));
+        } catch {
+          closed = true;
+          lifecycle.abort();
         }
-      })();
+      };
 
-      let analysis: RoomAnalysis;
       try {
-        const model = getVisionModel();
-        const result = await model.generateContent(
-          {
-            contents: [
-              {
-                role: "user",
-                parts: [
-                  { text: buildUserPrompt(body.images.length, dimensions) },
-                  ...imageParts,
-                ],
-              },
-            ],
-          },
-          { signal: stage1Abort.signal }
+        const { analysis, plan } = await analyzeAndPlan(
+          input,
+          lifecycle.signal,
+          (a) => send("analysis", a)
         );
-        analysis = JSON.parse(result.response.text()) as RoomAnalysis;
-      } catch (err) {
-        clearTimeout(stage1Timer);
-        stage1Abort.abort();
-        if (isAbortError(err) || stage1Abort.signal.aborted) {
-          send("error", {
-            code: "UPSTREAM_ERROR",
-            message: "Analisi scaduta, riprova",
-          });
-        } else {
-          send("error", mapGeminiError(err));
-        }
-        send("done", {});
-        controller.close();
-        return;
-      }
-
-      if (!isRoomAnalysis(analysis)) {
-        send("error", {
-          code: "UPSTREAM_ERROR",
-          message: "Risposta Gemini non conforme allo schema atteso",
-        });
-        send("done", {});
-        controller.close();
-        return;
-      }
-
-      if (analysis.confidence === "low" && /non determinabile/i.test(analysis.style)) {
-        send("error", {
-          code: "NOT_A_ROOM",
-          message:
-            "Le immagini non sembrano mostrare una stanza. Riprova con foto degli interni.",
-        });
-        send("done", {});
-        controller.close();
-        return;
-      }
-
-      send("analysis", analysis);
-
-      const plan = await planPromise;
-      clearTimeout(stage1Timer);
-      if (!plan.ok) {
-        if (isAbortError(plan.error) || stage1Abort.signal.aborted) {
-          send("error", {
-            code: "UPSTREAM_ERROR",
-            message: "Analisi scaduta, riprova",
-          });
-        } else {
-          send("error", mapGeminiError(plan.error));
-        }
-        send("done", {});
-        controller.close();
-        return;
-      }
-      if (
-        !Array.isArray(plan.items) ||
-        plan.items.length === 0 ||
-        !plan.items.every(
-          (i) => typeof i?.category === "string" && typeof i?.query === "string"
-        )
-      ) {
-        send("error", {
-          code: "UPSTREAM_ERROR",
-          message: "Piano d'arredo Gemini non conforme allo schema",
-        });
-        send("done", {});
-        controller.close();
-        return;
-      }
-
-      // Stadio 3 — controller separato per le ricerche SerpAPI (timeout 20s).
-      const stage3Abort = new AbortController();
-      const stage3Timer = setTimeout(
-        () => stage3Abort.abort(),
-        STAGE3_TIMEOUT_MS
-      );
-
-      const queries = plan.items.slice(0, MAX_ITEMS);
-      const products: Product[] = [];
-      let stage3Aborts = 0;
-      await Promise.all(
-        queries.map(async (item) => {
+        const products = await searchProducts(
+          plan,
+          input.budget,
+          lifecycle.signal,
+          (p) => send("product", p),
+          (w) => send("warning", w)
+        );
+        if (!lifecycle.signal.aborted) {
           try {
-            const product = await searchShopping(
-              item.query,
-              item.category,
-              priceRange,
-              stage3Abort.signal
-            );
-            if (product) {
-              products.push(product);
-              send("product", product);
-            }
+            const id = await setShared({ analysis, products });
+            send("shared", { id });
           } catch (err) {
-            // Un singolo fallimento non interrompe le altre query parallele.
-            if (isAbortError(err) || stage3Abort.signal.aborted) {
-              stage3Aborts++;
-            } else if (err instanceof SerpApiError && err.status === 500) {
-              send("error", { code: "INTERNAL", message: err.message });
-            }
+            // Il link di condivisione è accessorio: non fa fallire la risposta.
+            console.error("[recommend] share store failed", err);
           }
-        })
-      );
-      clearTimeout(stage3Timer);
-
-      if (products.length === 0 && stage3Aborts > 0) {
-        send("error", {
-          code: "UPSTREAM_ERROR",
-          message: "Ricerca prodotti scaduta, riprova",
-        });
+        }
+      } catch (err) {
+        if (err instanceof PipelineStop) {
+          send("error", err.payload);
+        } else if (!lifecycle.signal.aborted) {
+          console.error("[recommend] unexpected error", err);
+          send("error", { code: "INTERNAL", message: "Errore interno, riprova" });
+        }
+      } finally {
         send("done", {});
-        controller.close();
-        return;
+        req.signal?.removeEventListener("abort", onClientAbort);
+        lifecycle.abort();
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {
+            /* già chiuso */
+          }
+        }
       }
-
-      const id = setShared({ analysis, products });
-      send("shared", { id });
-      send("done", {});
-      controller.close();
+    },
+    cancel() {
+      lifecycle.abort();
     },
   });
 

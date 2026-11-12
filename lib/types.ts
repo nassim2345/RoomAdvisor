@@ -12,6 +12,8 @@ export interface RoomAnalysis {
   confidence: Confidence;
   observations: string[];
   issues: Issue[];
+  /** Assente nei risultati condivisi prima dell'introduzione del campo. */
+  isRoom?: boolean;
 }
 
 export type AnalyzeErrorCode =
@@ -36,13 +38,23 @@ export interface FurnitureQuery {
   query: string;
 }
 
-export interface Product {
-  category: string;
-  query: string;
+export interface ProductOption {
   name: string;
   price: string | null;
+  /** Prezzo numerico in euro, se SerpAPI lo fornisce. */
+  priceValue?: number | null;
   link: string;
   thumbnail: string | null;
+  source?: string | null;
+}
+
+export interface Product extends ProductOption {
+  category: string;
+  query: string;
+  /** Posizione nel piano d'arredo: ordina i prodotti in modo stabile. */
+  rank?: number;
+  /** Opzioni alternative per la stessa categoria (esclusa quella principale). */
+  alternatives?: ProductOption[];
 }
 
 export interface PriceRange {

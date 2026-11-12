@@ -9,6 +9,18 @@ import {
   SYSTEM_INSTRUCTION,
 } from "./prompts";
 
+const DEFAULT_MODEL = "gemini-2.5-flash";
+
+function modelName(): string {
+  return process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
+}
+
+/** Errori transitori di Gemini per cui ha senso un retry con backoff. */
+export function isRetryableGeminiError(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  return status === 429 || status === 500 || status === 503;
+}
+
 let cachedClient: GoogleGenerativeAI | null = null;
 
 export function getGeminiClient(): GoogleGenerativeAI {
@@ -28,7 +40,7 @@ export function getGeminiClient(): GoogleGenerativeAI {
 export function getVisionModel(): GenerativeModel {
   const client = getGeminiClient();
   return client.getGenerativeModel({
-    model: "gemini-2.5-flash",
+    model: modelName(),
     systemInstruction: SYSTEM_INSTRUCTION,
     generationConfig: {
       responseMimeType: "application/json",
@@ -40,7 +52,7 @@ export function getVisionModel(): GenerativeModel {
 export function getImagePlanningModel(): GenerativeModel {
   const client = getGeminiClient();
   return client.getGenerativeModel({
-    model: "gemini-2.5-flash",
+    model: modelName(),
     systemInstruction: IMAGE_PLAN_SYSTEM_INSTRUCTION,
     generationConfig: {
       responseMimeType: "application/json",

@@ -2,17 +2,19 @@ import { SchemaType, type ResponseSchema } from "@google/generative-ai";
 import { GOAL_LABELS, type Goal } from "./types";
 
 export const SYSTEM_INSTRUCTION = `Sei un interior designer. Analizza le foto della stanza e produci SOLO il JSON dello schema:
+- isRoom: true se le foto mostrano l'interno di una stanza/ambiente abitativo, false altrimenti
 - colors: 3-5 HEX dominanti (#RRGGBB maiuscolo)
 - style: stile in italiano, max 80 caratteri
 - dimensions: dimensioni stimate in italiano (es. "circa 15-20 m², soffitto ~2.7m")
 - confidence: "high" se la stanza è chiara, "medium" se plausibile, "low" se ambigua
 - observations: 2-3 osservazioni concrete sulla stanza in italiano (es. "Soffitto alto con travi a vista", "Parete principale spoglia", "Luce naturale da una sola finestra"). Max 120 caratteri ciascuna. Niente giudizi, solo fatti visivi.
 - issues: 2-3 problemi prioritari da migliorare, ciascuno con "title" (max 60 caratteri, es. "Illuminazione insufficiente") e "description" (max 200 caratteri, spiega dove e perché). In italiano, costruttivi, prioritizzati per impatto.
-Se le foto NON mostrano una stanza: confidence "low", style "non determinabile", dimensions "non determinabili", observations [], issues [].`;
+Se le foto NON mostrano una stanza: isRoom false, colors con 1 HEX qualsiasi, confidence "low", style "non determinabile", dimensions "non determinabili", observations [], issues [].`;
 
 export const ROOM_ANALYSIS_SCHEMA: ResponseSchema = {
   type: SchemaType.OBJECT,
   properties: {
+    isRoom: { type: SchemaType.BOOLEAN },
     colors: {
       type: SchemaType.ARRAY,
       items: { type: SchemaType.STRING },
@@ -41,6 +43,7 @@ export const ROOM_ANALYSIS_SCHEMA: ResponseSchema = {
     },
   },
   required: [
+    "isRoom",
     "colors",
     "style",
     "dimensions",
