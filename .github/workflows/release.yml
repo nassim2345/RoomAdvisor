@@ -58,12 +58,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # I due DMG del Mac su job separati: creati in parallelo sullo stesso
+        # runner, hdiutil non riesce a smontare il secondo disco ("busy").
         include:
-          - os: windows-latest
+          - name: Windows
+            os: windows-latest
             target: --win
-          - os: macos-latest
-            target: --mac
-          - os: ubuntu-latest
+          - name: macOS-arm64
+            os: macos-latest
+            target: --mac --arm64
+          - name: macOS-x64
+            os: macos-latest
+            target: --mac --x64
+          - name: Linux
+            os: ubuntu-latest
             target: --linux
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -72,7 +80,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
@@ -86,6 +94,11 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
 
+      # Spotlight indicizza i dischi appena montati e ne blocca lo smontaggio.
+      - name: Disattiva Spotlight
+        if: runner.os == 'macOS'
+        run: sudo mdutil -a -i off
+
       - name: Installer
         run: npx electron-builder ${{ matrix.target }} --publish never
         env:
@@ -93,7 +106,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: RoomAdvisor-${{ runner.os }}
+          name: RoomAdvisor-${{ matrix.name }}
           path: |
             dist-desktop/*.exe
             dist-desktop/*.dmg
